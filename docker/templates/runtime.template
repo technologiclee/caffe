@@ -1,0 +1,18 @@
+# Also build some other utility targets.
+RUN cd /opt/caffe/build && make -j"$(nproc)" test.testbin
+
+
+# Add to Python path
+ENV CAFFE_ROOT=/opt/caffe
+
+ENV PYTHONPATH=$CAFFE_ROOT/python:$PYTHONPATH
+ENV PATH=$CAFFE_ROOT/build/tools:$PATH
+
+# Set /workspace as working directory
+WORKDIR /workspace
+
+# Set the entrypoint
+ENTRYPOINT ["caffe"]
+
+# And the default command line options.
+CMD ["--help"]

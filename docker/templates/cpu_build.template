@@ -1,0 +1,11 @@
+# Clone Caffe repo and move into it
+RUN cd /opt && git clone https://github.com/BVLC/caffe.git && cd caffe && \
+# Get the python prerequsites for this repository
+  cat python/requirements.txt | xargs -n1 pip install && \
+# Create a build directory
+  mkdir build && cd build && \
+# Run cmake
+  cmake -DCPU_ONLY=1 .. && \
+# # Make
+  make -j"$(nproc)" all && \
+  make -j"$(nproc)" pycaffe
