@@ -306,7 +306,7 @@ message ParamSpec {
 // NOTE
 // Update the next available ID when you add a new LayerParameter field.
 //
-// LayerParameter next available layer-specific ID: 140 (last added: batch_norm_param)
+// LayerParameter next available layer-specific ID: 141 (last added: rbm_inner_product_param)
 message LayerParameter {
   optional string name = 1; // the layer name
   optional string type = 2; // the layer type
@@ -380,6 +380,7 @@ message LayerParameter {
   optional PowerParameter power_param = 122;
   optional PReLUParameter prelu_param = 131;
   optional PythonParameter python_param = 130;
+  optional RBMInnerProductParameter rbm_inner_product_param = 140;
   optional ReductionParameter reduction_param = 136;
   optional ReLUParameter relu_param = 123;
   optional ReshapeParameter reshape_param = 133;
@@ -428,7 +429,7 @@ message LossParameter {
     // Outputs that receive the ignore label will NOT be ignored in computing
     // the normalization factor.
     FULL = 0;
-    // Divide by the total number of output locations that do not take the 
+    // Divide by the total number of output locations that do not take the
     // ignore_label.  If ignore_label is not set, this behaves like FULL.
     VALID = 1;
     // Divide by the batch size.
@@ -743,6 +744,23 @@ message InnerProductParameter {
   // all preceding axes are retained in the output.
   // May be negative to index from the end (e.g., -1 for the last axis).
   optional int32 axis = 5 [default = 1];
+}
+
+message RBMInnerProductParameter {
+  // Whether to have a visable bias term (note that the bias term in
+  // InnerProduct acts as a hidden bias)
+  optional bool visable_bias_term = 1;
+  // Number gibbs sampling iterations to perform during update
+  optional uint32 sample_steps_in_update = 2 [default = 1];
+  // The filler for the visable bias
+  optional FillerParameter visable_bias_filler = 3;
+  // Set to true if the second top is a loss, and not a clamp
+  optional bool second_top_is_loss = 4 [default = false];
+  enum LossMeasure {
+    RECONSTRUCTION = 0;
+    FREE_ENERGY    = 1;
+  }
+  optional LossMeasure loss_measure = 5 [default = RECONSTRUCTION];
 }
 
 // Message that stores parameters used by LogLayer
