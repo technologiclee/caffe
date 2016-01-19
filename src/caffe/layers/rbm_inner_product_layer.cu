@@ -129,7 +129,7 @@ void squash(const vector<Blob<Dtype>*>& top) {
 template <typename Dtype>
 void RBMInnerProductLayer<Dtype>::Forward_gpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
-  InnerProductLayer<Dtype>::Forward_gpu(bottom, top);
+  Update_gpu(bottom, top);
 }
 
 template <typename Dtype>
@@ -142,7 +142,7 @@ void RBMInnerProductLayer<Dtype>::SampleForward_gpu(
     const int N = top[0]->count();
     caffe_copy(N, top[0]->gpu_data(), top[1]->mutable_gpu_diff());
   }
-  Forward_gpu(bottom, top);
+  InnerProductLayer<Dtype>::Forward_gpu(bottom, top);
   squash(top);
 
   if (top.size() == 1) {
@@ -226,7 +226,7 @@ void RBMInnerProductLayer<Dtype>::Update_gpu(const vector<Blob<Dtype>*>& bottom,
   visable.push_back(&visable_samp);
 
   // Do the forward pass without squashing, so that we can calculate free energy
-  Forward_gpu(bottom, hidden);
+  InnerProductLayer<Dtype>::Forward_gpu(bottom, hidden);
   if (error_vector &&
       this->layer_param_.rbm_inner_product_param().loss_measure() ==
           RBMInnerProductParameter_LossMeasure_FREE_ENERGY) {
@@ -317,7 +317,7 @@ void RBMInnerProductLayer<Dtype>::Update_gpu(const vector<Blob<Dtype>*>& bottom,
     SampleForward_gpu(visable, hidden);
     SampleBackward_gpu(hidden, visable);
   }
-  Forward_gpu(visable, hidden);
+  InnerProductLayer<Dtype>::Forward_gpu(visable, hidden);
   squash(hidden);
 
   // delta w_ij += P(H_i | v_k) * v_j^k

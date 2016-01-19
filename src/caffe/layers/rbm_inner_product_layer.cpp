@@ -172,7 +172,7 @@ void squash(const vector<Blob<Dtype>*>& top) {
 template <typename Dtype>
 void RBMInnerProductLayer<Dtype>::Forward_cpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
-  InnerProductLayer<Dtype>::Forward_cpu(bottom, top);
+  Update_cpu(bottom, top);
 }
 
 template <typename Dtype>
@@ -185,7 +185,7 @@ void RBMInnerProductLayer<Dtype>::SampleForward_cpu(
     const int N = top[0]->count();
     caffe_copy(N, top[0]->cpu_data(), top[1]->mutable_cpu_diff());
   }
-  Forward_cpu(bottom, top);
+  InnerProductLayer<Dtype>::Forward_cpu(bottom, top);
   squash(top);
   if (top.size() == 1) {
     make_samples(top[0]);
@@ -264,7 +264,7 @@ void RBMInnerProductLayer<Dtype>::Update_cpu(const vector<Blob<Dtype>*>& bottom,
 
   // In order to calculate the free energy, we need to do the forward pass
   // without squashing.
-  Forward_cpu(bottom, hidden);
+  InnerProductLayer<Dtype>::Forward_cpu(bottom, hidden);
   if (error_vector &&
       this->layer_param_.rbm_inner_product_param().loss_measure() ==
           RBMInnerProductParameter_LossMeasure_FREE_ENERGY) {
@@ -346,7 +346,7 @@ void RBMInnerProductLayer<Dtype>::Update_cpu(const vector<Blob<Dtype>*>& bottom,
     SampleForward_cpu(visable, hidden);
     SampleBackward_cpu(hidden, visable);
   }
-  Forward_cpu(visable, hidden);
+  InnerProductLayer<Dtype>::Forward_cpu(visable, hidden);
   squash(hidden);
 
   // delta w_ij += P(H_i | v_k) * v_j^k
