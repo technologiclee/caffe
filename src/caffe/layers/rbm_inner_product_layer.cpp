@@ -376,6 +376,13 @@ void RBMInnerProductLayer<Dtype>::Update_cpu(const vector<Blob<Dtype>*>& bottom,
   }
 }
 
+#ifdef CPU_ONLY
+STUB_GPU(RBMInnerProductLayer);
+STUB_GPU_FORWARD(RBMInnerProductLayer, SampleForward);
+STUB_GPU_FORWARD(RBMInnerProductLayer, Update);
+STUB_GPU_FORWARD(RBMInnerProductLayer, SampleBackward);
+#endif
+
 INSTANTIATE_CLASS(RBMInnerProductLayer);
 REGISTER_LAYER_CLASS(RBMInnerProduct);
 
