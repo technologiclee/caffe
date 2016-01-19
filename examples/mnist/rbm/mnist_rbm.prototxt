@@ -68,7 +68,6 @@ layer {
       value: 0.0
     }
     sample_steps_in_update: 1
-    second_top_is_loss: true
   }
   param {
     lr_mult: 1

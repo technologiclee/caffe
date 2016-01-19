@@ -18,20 +18,6 @@ inline void make_samples(Blob<Dtype>* to_sample) {
   }
 }
 
-/** @brief overwrite the data with samples, clamp with clamps */
-template <typename Dtype>
-inline void make_samples(Blob<Dtype>* to_sample, Blob<Dtype>* clamps) {
-  int random_number;
-  Dtype* blob_data = to_sample->mutable_cpu_data();
-  const Dtype* clmp_data = clamps->cpu_data();
-  const Dtype* start_data = clamps->cpu_diff();
-  for (int i = 0; i < to_sample->count(); ++i) {
-    caffe_rng_bernoulli(1, blob_data[i], &random_number);
-    blob_data[i] =
-        clmp_data[i] * start_data[i] + (1 - clmp_data[i]) * random_number;
-  }
-}
-
 /** @brief use probabilities from probs to create samples writen to samps */
 template <typename Dtype>
 inline void make_samples_from_diff(Blob<Dtype>* probs, Blob<Dtype>* samps) {
@@ -42,27 +28,6 @@ inline void make_samples_from_diff(Blob<Dtype>* probs, Blob<Dtype>* samps) {
   for (int i = 0; i < probs->count(); ++i) {
     caffe_rng_bernoulli(1, prob_data[i], &random_number);
     samp_data[i] = random_number;
-  }
-}
-
-/**
- * @brief use probabilities from probs to create samples writen to samps
- *        and clamp with the third blob
- */
-template <typename Dtype>
-inline void make_samples_from_diff(Blob<Dtype>* probs, Blob<Dtype>* samps,
-                                   Blob<Dtype>* clamps) {
-  CHECK_EQ(probs->count(), samps->count());
-  CHECK_EQ(probs->count(), clamps->count());
-  int random_number;
-  const Dtype* prob_data = probs->cpu_diff();
-  const Dtype* clmp_data = clamps->cpu_data();
-  Dtype* samp_data = samps->mutable_cpu_data();
-
-  for (int i = 0; i < probs->count(); ++i) {
-    caffe_rng_bernoulli(1, prob_data[i], &random_number);
-    samp_data[i] =
-        clmp_data[i] * samp_data[i] + (1 - clmp_data[i]) * random_number;
   }
 }
 
@@ -100,47 +65,16 @@ void RBMInnerProductLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
 template <typename Dtype>
 void RBMInnerProductLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
                                           const vector<Blob<Dtype>*>& top) {
-  if (bottom.size() > 1) {
-    for (int i = 0; i < bottom[0]->num_axes(); ++i) {
-      CHECK_EQ(bottom[0]->shape(i), bottom[1]->shape(i))
-          << "Data and clamp inputs must have the same dimensions";
-    }
-  }
   InnerProductLayer<Dtype>::Reshape(bottom, top);
   if (top.size() > 1) {
-    if (this->layer_param_.rbm_inner_product_param().second_top_is_loss()) {
-      vector<int> blob_shape(2, 1);
-      switch (this->layer_param_.rbm_inner_product_param().loss_measure()) {
-        case RBMInnerProductParameter_LossMeasure_RECONSTRUCTION:
-          top[1]->ReshapeLike(*bottom[0]);
-          break;
-        case RBMInnerProductParameter_LossMeasure_FREE_ENERGY:
-          blob_shape[0] = this->M_;  // M_ is batch size
-          top[1]->Reshape(blob_shape);
-          break;
-        default:
-          LOG(FATAL)
-              << "Unknown loss measure: "
-              << this->layer_param_.rbm_inner_product_param().loss_measure();
-      }
-      CHECK_LE(top.size(), 2)
-          << "if the second_top_is_loss, you can't have third top";
-    } else {
-      for (int i = 0; i < top[0]->num_axes(); ++i) {
-        CHECK_EQ(top[0]->shape(i), top[1]->shape(i))
-            << "hidden output and clamp inputs must have the same dimensions";
-      }
-    }
-  }
-  if (top.size() > 2) {
     vector<int> blob_shape(2, 1);
     switch (this->layer_param_.rbm_inner_product_param().loss_measure()) {
       case RBMInnerProductParameter_LossMeasure_RECONSTRUCTION:
-        top[2]->ReshapeLike(*bottom[0]);
+        top[1]->ReshapeLike(*bottom[0]);
         break;
       case RBMInnerProductParameter_LossMeasure_FREE_ENERGY:
         blob_shape[0] = bottom[0]->shape(0);
-        top[2]->Reshape(blob_shape);
+        top[1]->Reshape(blob_shape);
         break;
       default:
         LOG(FATAL)
@@ -178,20 +112,9 @@ void RBMInnerProductLayer<Dtype>::Forward_cpu(
 template <typename Dtype>
 void RBMInnerProductLayer<Dtype>::SampleForward_cpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
-  if (top.size() > 1) {
-    CHECK_EQ(top[0]->count(), top[1]->count())
-        << "data and clamps must be same size";
-    // copy the data to the clamp's diffs, sort of a hack but OK
-    const int N = top[0]->count();
-    caffe_copy(N, top[0]->cpu_data(), top[1]->mutable_cpu_diff());
-  }
   InnerProductLayer<Dtype>::Forward_cpu(bottom, top);
   squash(top);
-  if (top.size() == 1) {
-    make_samples(top[0]);
-  } else {
-    make_samples(top[0], top[1]);
-  }
+  make_samples(top[0]);
 }
 
 template <typename Dtype>
@@ -233,11 +156,7 @@ void RBMInnerProductLayer<Dtype>::SampleBackward_cpu(
     const vector<Blob<Dtype>*>& top, const vector<Blob<Dtype>*>& bottom) {
   vector<bool> prop_down(top.size(), false);
   this->Backward_cpu(top, prop_down, bottom);
-  if (bottom.size() == 1) {
-    make_samples_from_diff(bottom[0], bottom[0]);
-  } else {
-    make_samples_from_diff(bottom[0], bottom[0], bottom[1]);
-  }
+  make_samples_from_diff(bottom[0], bottom[0]);
 }
 
 template <typename Dtype>
@@ -245,12 +164,8 @@ void RBMInnerProductLayer<Dtype>::Update_cpu(const vector<Blob<Dtype>*>& bottom,
                                              const vector<Blob<Dtype>*>& top) {
   vector<bool> prop_down(top.size(), false);
   Dtype* error_vector = 0;
-  if (top.size() == 3) {
-    error_vector = top[2]->mutable_cpu_data();
-  } else {
-    if (this->layer_param_.rbm_inner_product_param().second_top_is_loss()) {
-      error_vector = top[1]->mutable_cpu_data();
-    }
+  if (top.size() > 1) {
+    error_vector = top[1]->mutable_cpu_data();
   }
 
   // set up the vectors that hold the hidden data

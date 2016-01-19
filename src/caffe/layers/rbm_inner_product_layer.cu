@@ -54,24 +54,6 @@ inline void make_samples(Blob<Dtype>* to_sample, Dtype* uniform_sample) {
   CUDA_POST_KERNEL_CHECK;
 }
 
-/** @brief overwrite the data with samples, clamp with clamps */
-template <typename Dtype>
-inline void make_samples(Blob<Dtype>* to_sample, Blob<Dtype>* clamps,
-                         Dtype* uniform_sample) {
-  Dtype* blob_data = to_sample->mutable_gpu_data();
-  const int count = to_sample->count();
-
-  // create some uniform samples
-  caffe_gpu_rng_uniform<Dtype>(count, 0., 1., uniform_sample);
-
-  // Transform this to zeros and ones
-  // NOLINT_NEXT_LINE(whitespace/operators)
-  CompareKernel<Dtype> << <CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>
-      (count, clamps->gpu_diff(), blob_data, uniform_sample, clamps->gpu_data(),
-       blob_data);
-  CUDA_POST_KERNEL_CHECK;
-}
-
 /** @brief use probabilities from probs to create samples writen to samps */
 template <typename Dtype>
 inline void make_samples_from_diff(Blob<Dtype>* probs, Blob<Dtype>* samps,
@@ -89,31 +71,6 @@ inline void make_samples_from_diff(Blob<Dtype>* probs, Blob<Dtype>* samps,
   // NOLINT_NEXT_LINE(whitespace/operators)
   CompareKernel<Dtype> << <CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>
       (count, prob_data, uniform_sample, samp_data);
-  CUDA_POST_KERNEL_CHECK;
-}
-
-/**
- * @brief use probabilities from probs to create samples writen to samps
- *        and clamp with the third blob
- */
-template <typename Dtype>
-inline void make_samples_from_diff(Blob<Dtype>* probs, Blob<Dtype>* samps,
-                                   Blob<Dtype>* clamps, Dtype* uniform_sample) {
-  CHECK_EQ(probs->count(), samps->count());
-  CHECK_EQ(probs->count(), clamps->count());
-  const Dtype* prob_data = probs->gpu_diff();
-  Dtype* samp_data = samps->mutable_gpu_data();
-  const Dtype* clmp_data = clamps->gpu_data();
-  const Dtype* start_data = probs->gpu_data();
-  const int count = probs->count();
-
-  // create some uniform samples
-  caffe_gpu_rng_uniform<Dtype>(count, 0., 1., uniform_sample);
-
-  // Transform this to zeros and ones
-  // NOLINT_NEXT_LINE(whitespace/operators)
-  CompareKernel<Dtype> << <CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>
-      (count, start_data, prob_data, uniform_sample, clmp_data, samp_data);
   CUDA_POST_KERNEL_CHECK;
 }
 
@@ -135,22 +92,9 @@ void RBMInnerProductLayer<Dtype>::Forward_gpu(
 template <typename Dtype>
 void RBMInnerProductLayer<Dtype>::SampleForward_gpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
-  if (top.size() > 1) {
-    CHECK_EQ(top[0]->count(), top[1]->count())
-        << "data and clamps must be same size";
-    // copy the data to the clamp's diffs, sort of a hack but OK
-    const int N = top[0]->count();
-    caffe_copy(N, top[0]->gpu_data(), top[1]->mutable_gpu_diff());
-  }
   InnerProductLayer<Dtype>::Forward_gpu(bottom, top);
   squash(top);
-
-  if (top.size() == 1) {
-    make_samples(top[0], static_cast<Dtype*>(rng_data_->mutable_gpu_data()));
-  } else {
-    make_samples(top[0], top[1],
-                 static_cast<Dtype*>(rng_data_->mutable_gpu_data()));
-  }
+  make_samples(top[0], static_cast<Dtype*>(rng_data_->mutable_gpu_data()));
 }
 
 template <typename Dtype>
@@ -194,13 +138,8 @@ void RBMInnerProductLayer<Dtype>::SampleBackward_gpu(
     const vector<Blob<Dtype>*>& top, const vector<Blob<Dtype>*>& bottom) {
   vector<bool> prop_down(top.size(), false);
   this->Backward_gpu(top, prop_down, bottom);
-  if (bottom.size() == 1) {
-    make_samples_from_diff(bottom[0], bottom[0],
-                           static_cast<Dtype*>(rng_data_->mutable_gpu_data()));
-  } else {
-    make_samples_from_diff(bottom[0], bottom[0], bottom[1],
-                           static_cast<Dtype*>(rng_data_->mutable_gpu_data()));
-  }
+  make_samples_from_diff(bottom[0], bottom[0],
+                         static_cast<Dtype*>(rng_data_->mutable_gpu_data()));
 }
 
 template <typename Dtype>
@@ -208,12 +147,8 @@ void RBMInnerProductLayer<Dtype>::Update_gpu(const vector<Blob<Dtype>*>& bottom,
                                              const vector<Blob<Dtype>*>& top) {
   vector<bool> prop_down(top.size(), false);
   Dtype* error_vector = 0;
-  if (top.size() == 3) {
-    error_vector = top[2]->mutable_gpu_data();
-  } else {
-    if (this->layer_param_.rbm_inner_product_param().second_top_is_loss()) {
-      error_vector = top[1]->mutable_gpu_data();
-    }
+  if (top.size() > 1) {
+    error_vector = top[1]->mutable_gpu_data();
   }
 
   // set up the vectors that hold the hidden data
@@ -239,11 +174,6 @@ void RBMInnerProductLayer<Dtype>::Update_gpu(const vector<Blob<Dtype>*>& bottom,
     } else {
       caffe_gpu_set(this->M_, Dtype(0.), error_vector);
     }
-    std::cout << "\n\nerror vector after bias " << this->M_ << std::endl;
-    for (int i = 0; i < 20; ++i) {
-      std::cout << "  " << top[1]->cpu_data()[i];
-    }
-    std::cout << "\n\nerror vector other stuff " << std::endl;
     // Take the exponential function of hidden (but not yet squashed) values
     const Dtype* hidden_data = hidden[0]->gpu_data();
     Dtype* exp_data = static_cast<Dtype*>(rng_data_->mutable_gpu_data());

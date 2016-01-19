@@ -754,13 +754,11 @@ message RBMInnerProductParameter {
   optional uint32 sample_steps_in_update = 2 [default = 1];
   // The filler for the visable bias
   optional FillerParameter visable_bias_filler = 3;
-  // Set to true if the second top is a loss, and not a clamp
-  optional bool second_top_is_loss = 4 [default = false];
   enum LossMeasure {
     RECONSTRUCTION = 0;
     FREE_ENERGY    = 1;
   }
-  optional LossMeasure loss_measure = 5 [default = RECONSTRUCTION];
+  optional LossMeasure loss_measure = 4 [default = RECONSTRUCTION];
 }
 
 // Message that stores parameters used by LogLayer
