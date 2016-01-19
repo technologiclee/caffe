@@ -8,7 +8,6 @@
 #include "caffe/layers/sigmoid_layer.hpp"
 #include "caffe/unsupervised_layers.hpp"
 
-
 #include "caffe/test/test_caffe_main.hpp"
 #include "caffe/test/test_gradient_check_util.hpp"
 
@@ -113,7 +112,8 @@ TYPED_TEST(RBMInnerProductLayerTest, TestForward) {
   layer->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
 
   // In order to test the forward, sigmoid layer is used to squash the output.
-  shared_ptr<SigmoidLayer<Dtype> > squash(new SigmoidLayer<Dtype>(LayerParameter()));
+  shared_ptr<SigmoidLayer<Dtype> > squash(
+      new SigmoidLayer<Dtype>(LayerParameter()));
 
   Blob<Dtype> blob_squash(this->blob_top_input_->shape());
   vector<Blob<Dtype>*> blob_squash_vec;
