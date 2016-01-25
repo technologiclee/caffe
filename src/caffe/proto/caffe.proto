@@ -747,13 +747,13 @@ message InnerProductParameter {
 }
 
 message RBMInnerProductParameter {
-  // Whether to have a visable bias term (note that the bias term in
+  // Whether to have a visible bias term (note that the bias term in
   // InnerProduct acts as a hidden bias)
-  optional bool visable_bias_term = 1;
+  optional bool visible_bias_term = 1;
   // Number gibbs sampling iterations to perform during update
   optional uint32 sample_steps_in_update = 2 [default = 1];
-  // The filler for the visable bias
-  optional FillerParameter visable_bias_filler = 3;
+  // The filler for the visible bias
+  optional FillerParameter visible_bias_filler = 3;
   enum LossMeasure {
     RECONSTRUCTION = 0;
     FREE_ENERGY    = 1;

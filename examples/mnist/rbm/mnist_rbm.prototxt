@@ -62,8 +62,8 @@ layer {
     }
   }
   rbm_inner_product_param {
-    visable_bias_term: true
-    visable_bias_filler {
+    visible_bias_term: true
+    visible_bias_filler {
       type: "constant"
       value: 0.0
     }

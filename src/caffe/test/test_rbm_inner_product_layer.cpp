@@ -5,8 +5,7 @@
 #include "caffe/blob.hpp"
 #include "caffe/common.hpp"
 #include "caffe/filler.hpp"
-#include "caffe/layers/sigmoid_layer.hpp"
-#include "caffe/unsupervised_layers.hpp"
+#include "caffe/layers/rbm_inner_product_layer.hpp"
 
 #include "caffe/test/test_caffe_main.hpp"
 #include "caffe/test/test_gradient_check_util.hpp"
@@ -24,8 +23,7 @@ class RBMInnerProductLayerTest : public MultiDeviceTest<TypeParam> {
  protected:
   RBMInnerProductLayerTest()
       : blob_bottom_input_(new Blob<Dtype>(2, 3, 4, 5)),
-        blob_top_input_(new Blob<Dtype>()),
-        blob_top_error_(new Blob<Dtype>()) {
+        blob_top_input_(new Blob<Dtype>()) {
     // fill the values
     FillerParameter filler_param;
     filler_param.set_type("gaussian");
@@ -33,12 +31,10 @@ class RBMInnerProductLayerTest : public MultiDeviceTest<TypeParam> {
     filler.Fill(this->blob_bottom_input_);
     blob_bottom_vec_.push_back(blob_bottom_input_);
     blob_top_vec_.push_back(blob_top_input_);
-    blob_top_vec_.push_back(blob_top_error_);
   }
   virtual ~RBMInnerProductLayerTest() {
     delete blob_bottom_input_;
     delete blob_top_input_;
-    delete blob_top_error_;
   }
 
   void fill_gaussian(Blob<Dtype>* fill_me) {
@@ -50,7 +46,6 @@ class RBMInnerProductLayerTest : public MultiDeviceTest<TypeParam> {
 
   Blob<Dtype>* const blob_bottom_input_;
   Blob<Dtype>* const blob_top_input_;
-  Blob<Dtype>* const blob_top_error_;
   vector<Blob<Dtype>*> blob_bottom_vec_;
   vector<Blob<Dtype>*> blob_top_vec_;
 };
@@ -60,26 +55,44 @@ TYPED_TEST_CASE(RBMInnerProductLayerTest, TestDtypesAndDevices);
 TYPED_TEST(RBMInnerProductLayerTest, TestSetUp) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
-  InnerProductParameter* inner_product_param =
-      layer_param.mutable_inner_product_param();
-  inner_product_param->set_num_output(10);
+  layer_param.mutable_inner_product_param()->set_num_output(10);
+
   shared_ptr<RBMInnerProductLayer<Dtype> > layer(
       new RBMInnerProductLayer<Dtype>(layer_param));
   layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
 
-  EXPECT_EQ(this->blob_bottom_input_->num(), 2);
-  EXPECT_EQ(this->blob_bottom_input_->channels(), 3);
-  EXPECT_EQ(this->blob_bottom_input_->height(), 4);
-  EXPECT_EQ(this->blob_bottom_input_->width(), 5);
-  EXPECT_EQ(this->blob_top_input_->num(), 2);
-  EXPECT_EQ(this->blob_top_input_->channels(), 10);
-  EXPECT_EQ(this->blob_top_input_->height(), 1);
-  EXPECT_EQ(this->blob_top_input_->width(), 1);
-  EXPECT_EQ(this->blob_top_error_->num(), 2);
-  EXPECT_EQ(this->blob_top_error_->channels(), 3);
-  EXPECT_EQ(this->blob_top_error_->height(), 4);
-  EXPECT_EQ(this->blob_top_error_->width(), 5);
+  vector<int> expected_in(4);
+  expected_in[0] = 2; expected_in[1] = 3; expected_in[2] = 4; expected_in[3] = 5;
+  EXPECT_EQ(this->blob_bottom_input_->shape(), expected_in);
+
+  vector<int> expected_out(2);
+  expected_out[0] = 2; expected_out[1] = 10;
+  EXPECT_EQ(this->blob_top_input_->shape(), expected_out);
 }
+
+
+TYPED_TEST(RBMInnerProductLayerTest, TestReshape) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  layer_param.mutable_inner_product_param()->set_num_output(10);
+
+  shared_ptr<RBMInnerProductLayer<Dtype> > layer(
+      new RBMInnerProductLayer<Dtype>(layer_param));
+  layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+
+  vector<int> expected_in(4);
+  expected_in[0] = 6; expected_in[1] = 3; expected_in[2] = 4; expected_in[3] = 5;
+
+  this->blob_bottom_input_->Reshape(expected_in);
+  layer->Reshape(this->blob_bottom_vec_, this->blob_top_vec_);
+
+  EXPECT_EQ(this->blob_bottom_input_->shape(), expected_in);
+
+  vector<int> expected_out(2);
+  expected_out[0] = 6; expected_out[1] = 10;
+  EXPECT_EQ(this->blob_top_input_->shape(), expected_out);
+}
+
 
 TYPED_TEST(RBMInnerProductLayerTest, TestForward) {
   typedef typename TypeParam::Dtype Dtype;
@@ -95,96 +108,11 @@ TYPED_TEST(RBMInnerProductLayerTest, TestForward) {
   this->fill_gaussian(this->blob_top_input_);
   layer->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
 
-  // In order to test the forward, sigmoid layer is used to squash the output.
-  shared_ptr<SigmoidLayer<Dtype> > squash(
-      new SigmoidLayer<Dtype>(LayerParameter()));
-
-  Blob<Dtype> blob_squash(this->blob_top_input_->shape());
-  vector<Blob<Dtype>*> blob_squash_vec;
-  blob_squash_vec.push_back(&blob_squash);
-  squash->Forward(this->blob_top_vec_, blob_squash_vec);
-
-  const Dtype* test_data = blob_squash_vec[0]->cpu_data();
-  for (int i = 0; i < blob_squash_vec[0]->count(); ++i) {
+  const Dtype* test_data = this->blob_top_vec_[0]->cpu_data();
+  const int N = this->blob_top_vec_[0]->count();
+  for (int i = 0; i < N; ++i) {
     EXPECT_GE(test_data[i], 0);
     EXPECT_LE(test_data[i], 1);
-  }
-}
-
-TYPED_TEST(RBMInnerProductLayerTest, TestBackward) {
-  typedef typename TypeParam::Dtype Dtype;
-  LayerParameter layer_param;
-  InnerProductParameter* inner_product_param =
-      layer_param.mutable_inner_product_param();
-  inner_product_param->set_num_output(10);
-  inner_product_param->mutable_weight_filler()->set_type("gaussian");
-  RBMInnerProductParameter* rbm_inner_product_param =
-      layer_param.mutable_rbm_inner_product_param();
-  rbm_inner_product_param->set_visable_bias_term(true);
-  shared_ptr<RBMInnerProductLayer<Dtype> > layer(
-      new RBMInnerProductLayer<Dtype>(layer_param));
-  layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
-  vector<bool> false_vector(1, false);
-  layer->Backward(this->blob_top_vec_, false_vector, this->blob_bottom_vec_);
-
-  for (int i = 0; i < this->blob_bottom_input_->count(); ++i) {
-    EXPECT_GE(this->blob_bottom_input_->cpu_data()[i], 0);
-    EXPECT_LE(this->blob_bottom_input_->cpu_data()[i], 1);
-    EXPECT_GE(this->blob_bottom_input_->cpu_diff()[i], 0);
-    EXPECT_LE(this->blob_bottom_input_->cpu_diff()[i], 1);
-  }
-}
-
-TYPED_TEST(RBMInnerProductLayerTest, TestForwardSample) {
-  typedef typename TypeParam::Dtype Dtype;
-  LayerParameter layer_param;
-  InnerProductParameter* inner_product_param =
-      layer_param.mutable_inner_product_param();
-  inner_product_param->set_num_output(10);
-  inner_product_param->mutable_weight_filler()->set_type("gaussian");
-  RBMInnerProductParameter* rbm_inner_product_param =
-      layer_param.mutable_rbm_inner_product_param();
-  rbm_inner_product_param->set_visable_bias_term(true);
-  shared_ptr<RBMInnerProductLayer<Dtype> > layer(
-      new RBMInnerProductLayer<Dtype>(layer_param));
-  layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
-
-  vector<Blob<Dtype>*> bottom;
-  bottom.push_back(this->blob_bottom_input_);
-  vector<Blob<Dtype>*> top;
-  top.push_back(this->blob_top_input_);
-  this->fill_gaussian(this->blob_top_input_);
-  layer->SampleForward(bottom, top);
-  const Dtype* top_data = this->blob_top_input_->cpu_data();
-  for (int i = 0; i < this->blob_top_input_->count(); ++i) {
-    EXPECT_TRUE(top_data[i] == 0 || top_data[i] == 1);
-  }
-}
-
-
-TYPED_TEST(RBMInnerProductLayerTest, TestBackwardSample) {
-  typedef typename TypeParam::Dtype Dtype;
-  LayerParameter layer_param;
-  InnerProductParameter* inner_product_param =
-      layer_param.mutable_inner_product_param();
-  inner_product_param->set_num_output(10);
-  inner_product_param->mutable_weight_filler()->set_type("gaussian");
-  RBMInnerProductParameter* rbm_inner_product_param =
-      layer_param.mutable_rbm_inner_product_param();
-  rbm_inner_product_param->set_visable_bias_term(true);
-  shared_ptr<RBMInnerProductLayer<Dtype> > layer(
-      new RBMInnerProductLayer<Dtype>(layer_param));
-  layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
-
-  vector<Blob<Dtype>*> bottom;
-  bottom.push_back(this->blob_bottom_input_);
-  vector<Blob<Dtype>*> top;
-  top.push_back(this->blob_top_input_);
-  this->fill_gaussian(this->blob_top_input_);
-  layer->SampleBackward(top, bottom);
-  const Dtype* bottom_data = this->blob_bottom_input_->cpu_data();
-  for (int i = 0; i < this->blob_bottom_input_->count(); ++i) {
-    EXPECT_TRUE(bottom_data[i] == 0 || bottom_data[i] == 1);
   }
 }
 
