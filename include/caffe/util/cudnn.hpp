@@ -53,14 +53,14 @@ template <typename Dtype> class dataType;
 template<> class dataType<float>  {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_FLOAT;
-  static float oneval, zeroval;
-  static const void *one, *zero;
+  static float oneval, zeroval, minusoneval;
+  static const void *one, *zero, *minusone;
 };
 template<> class dataType<double> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_DOUBLE;
-  static double oneval, zeroval;
-  static const void *one, *zero;
+  static double oneval, zeroval, minusoneval;
+  static const void *one, *zero, *minusone;
 };
 
 template <typename Dtype>
