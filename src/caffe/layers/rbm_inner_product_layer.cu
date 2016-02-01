@@ -78,8 +78,17 @@ template <typename Dtype>
 void squash(const vector<Blob<Dtype>*>& top) {
   const int count = top[0]->count();
   // NOLINT_NEXT_LINE(whitespace/operators)
-  SigmoidKernel<Dtype> << <CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>
+  SigmoidKernel<Dtype> <<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>
       (count, top[0]->mutable_gpu_data());
+  CUDA_POST_KERNEL_CHECK;
+}
+
+template <typename Dtype>
+void squash_diff(const vector<Blob<Dtype>*>& bottom) {
+  const int count = bottom[0]->count();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  SigmoidKernel<Dtype> <<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>
+      (count, bottom[0]->mutable_gpu_data());
   CUDA_POST_KERNEL_CHECK;
 }
 
@@ -124,13 +133,6 @@ void RBMInnerProductLayer<Dtype>::Backward_gpu(
                           this->blobs_[visable_bias_index_]->gpu_data(),
                           (Dtype)1., bottom_data);
   }
-
-  // do the squashing function
-  const int count = bottom[0]->count();
-  // NOLINT_NEXT_LINE(whitespace/operators)
-  SigmoidKernel<Dtype> << <CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>
-      (count, bottom_data);
-  CUDA_POST_KERNEL_CHECK;
 }
 
 template <typename Dtype>
@@ -138,6 +140,7 @@ void RBMInnerProductLayer<Dtype>::SampleBackward_gpu(
     const vector<Blob<Dtype>*>& top, const vector<Blob<Dtype>*>& bottom) {
   vector<bool> prop_down(top.size(), false);
   this->Backward_gpu(top, prop_down, bottom);
+  squash_diff(bottom);
   make_samples_from_diff(bottom[0], bottom[0],
                          static_cast<Dtype*>(rng_data_->mutable_gpu_data()));
 }
@@ -202,7 +205,7 @@ void RBMInnerProductLayer<Dtype>::Update_gpu(const vector<Blob<Dtype>*>& bottom,
   if (this->bias_term_) {
     Dtype* h_bias_diff = this->blobs_[1]->mutable_gpu_diff();
     // should be something ike this
-    caffe_gpu_gemv<Dtype>(CblasTrans, this->M_, this->N_, Dtype(-1. / this->M_),
+    caffe_gpu_gemv<Dtype>(CblasTrans, this->M_, this->N_, Dtype(-1.),
                           hidden[0]->gpu_data(),
                           this->bias_multiplier_.gpu_data(), Dtype(1.),
                           h_bias_diff);
@@ -213,7 +216,7 @@ void RBMInnerProductLayer<Dtype>::Update_gpu(const vector<Blob<Dtype>*>& bottom,
     Dtype* v_bias_diff = this->blobs_[visable_bias_index_]->mutable_gpu_diff();
 
     // should be something ike this
-    caffe_gpu_gemv<Dtype>(CblasTrans, this->M_, this->K_, Dtype(-1. / this->M_),
+    caffe_gpu_gemv<Dtype>(CblasTrans, this->M_, this->K_, Dtype(-1.),
                           bottom[0]->gpu_data(),
                           this->bias_multiplier_.gpu_data(), Dtype(1.),
                           v_bias_diff);
@@ -223,7 +226,7 @@ void RBMInnerProductLayer<Dtype>::Update_gpu(const vector<Blob<Dtype>*>& bottom,
 
   // do backwards pass to the visable layer
   Backward_gpu(hidden, prop_down, visable);
-
+  squash_diff(visable);
   // calculate the reconstruction error that will be returned as the loss
   if (error_vector) {
     switch (this->layer_param_.rbm_inner_product_param().loss_measure()) {
@@ -259,7 +262,7 @@ void RBMInnerProductLayer<Dtype>::Update_gpu(const vector<Blob<Dtype>*>& bottom,
   if (this->bias_term_) {
     Dtype* h_bias_diff = this->blobs_[1]->mutable_gpu_diff();
     // should be something ike this
-    caffe_gpu_gemv<Dtype>(CblasTrans, this->M_, this->N_, Dtype(1. / this->M_),
+    caffe_gpu_gemv<Dtype>(CblasTrans, this->M_, this->N_, Dtype(1.),
                           hidden[0]->gpu_data(),
                           this->bias_multiplier_.gpu_data(), Dtype(1.),
                           h_bias_diff);
@@ -270,7 +273,7 @@ void RBMInnerProductLayer<Dtype>::Update_gpu(const vector<Blob<Dtype>*>& bottom,
     Dtype* v_bias_diff = this->blobs_[visable_bias_index_]->mutable_gpu_diff();
 
     // should be something ike this
-    caffe_gpu_gemv<Dtype>(CblasTrans, this->M_, this->K_, Dtype(1. / this->M_),
+    caffe_gpu_gemv<Dtype>(CblasTrans, this->M_, this->K_, Dtype(1.),
                           visable[0]->gpu_data(),
                           this->bias_multiplier_.gpu_data(), Dtype(1.),
                           v_bias_diff);

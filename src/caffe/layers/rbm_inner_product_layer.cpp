@@ -82,16 +82,17 @@ void RBMInnerProductLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
             << this->layer_param_.rbm_inner_product_param().loss_measure();
     }
   }
-  const int max_count = std::max(bottom[0]->count(), top[0]->count());
+  int max_count = std::max(bottom[0]->count(), top[0]->count());
   if (max_count > rng_data_->size()) {
     rng_data_.reset(new SyncedMemory(max_count * sizeof(Dtype)));
   }
+  max_count = std::max(this->M_, this->N_);
   if (visable_bias_term_ && (this->bias_multiplier_.num_axes() < 2 ||
-                             this->bias_multiplier_.shape(1) < this->N_)) {
+                             this->bias_multiplier_.shape(1) < max_count)) {
     // we use this bias_multiplier_ to multiply both the hidden and vis bais
-    vector<int> bias_shape(1, this->N_);
+    vector<int> bias_shape(1, max_count);
     this->bias_multiplier_.Reshape(bias_shape);
-    caffe_set(this->N_, Dtype(1), this->bias_multiplier_.mutable_cpu_data());
+    caffe_set(max_count, Dtype(1), this->bias_multiplier_.mutable_cpu_data());
   }
 }
 
@@ -101,6 +102,15 @@ void squash(const vector<Blob<Dtype>*>& top) {
   Dtype* top_data = top[0]->mutable_cpu_data();
   for (int i = 0; i < top[0]->count(); ++i)
     top_data[i] = 1.0 / (1 + std::exp(-1 * top_data[i]));
+}
+
+template <typename Dtype>
+void squash_diff(const vector<Blob<Dtype>*>& bottom) {
+  // do the squashing function
+  Dtype* bottom_data = bottom[0]->mutable_cpu_diff();
+  for (int i = 0; i < bottom[0]->count(); ++i) {
+    bottom_data[i] = Dtype(1. / (1 + std::exp(-1 * bottom_data[i])));
+  }
 }
 
 template <typename Dtype>
@@ -144,11 +154,6 @@ void RBMInnerProductLayer<Dtype>::Backward_cpu(
                           this->blobs_[visable_bias_index_]->cpu_data(),
                           (Dtype)1., bottom_data);
   }
-
-  // do the squashing function
-  for (int i = 0; i < bottom[0]->count(); ++i) {
-    bottom_data[i] = Dtype(1. / (1 + std::exp(-1 * bottom_data[i])));
-  }
 }
 
 template <typename Dtype>
@@ -156,6 +161,7 @@ void RBMInnerProductLayer<Dtype>::SampleBackward_cpu(
     const vector<Blob<Dtype>*>& top, const vector<Blob<Dtype>*>& bottom) {
   vector<bool> prop_down(top.size(), false);
   this->Backward_cpu(top, prop_down, bottom);
+  squash_diff(bottom);
   make_samples_from_diff(bottom[0], bottom[0]);
 }
 
@@ -217,10 +223,11 @@ void RBMInnerProductLayer<Dtype>::Update_cpu(const vector<Blob<Dtype>*>& bottom,
   if (this->bias_term_) {
     Dtype* h_bias_diff = this->blobs_[1]->mutable_cpu_diff();
     // should be something ike this
-    caffe_cpu_gemv<Dtype>(CblasTrans, this->M_, this->N_, Dtype(-1. / this->M_),
+    
+    caffe_cpu_gemv<Dtype>(CblasTrans, this->M_, this->N_, Dtype(-1.),
                           hidden[0]->cpu_data(),
                           this->bias_multiplier_.cpu_data(), Dtype(1.),
-                          h_bias_diff);
+                          h_bias_diff);  
   }
 
   // update bias diffs with \delta b -= v_0
@@ -228,7 +235,7 @@ void RBMInnerProductLayer<Dtype>::Update_cpu(const vector<Blob<Dtype>*>& bottom,
     Dtype* v_bias_diff = this->blobs_[visable_bias_index_]->mutable_cpu_diff();
 
     // should be something ike this
-    caffe_cpu_gemv<Dtype>(CblasTrans, this->M_, this->K_, Dtype(-1. / this->M_),
+    caffe_cpu_gemv<Dtype>(CblasTrans, this->M_, this->K_, Dtype(-1.),
                           bottom[0]->cpu_data(),
                           this->bias_multiplier_.cpu_data(), Dtype(1.),
                           v_bias_diff);
@@ -238,7 +245,7 @@ void RBMInnerProductLayer<Dtype>::Update_cpu(const vector<Blob<Dtype>*>& bottom,
 
   // do backwards pass to the visable layer
   Backward_cpu(hidden, prop_down, visable);
-
+  squash_diff(visable);
   // calculate the reconstruction error that will be returned as the loss
   if (error_vector) {
     switch (this->layer_param_.rbm_inner_product_param().loss_measure()) {
@@ -273,7 +280,7 @@ void RBMInnerProductLayer<Dtype>::Update_cpu(const vector<Blob<Dtype>*>& bottom,
   if (this->bias_term_) {
     Dtype* h_bias_diff = this->blobs_[1]->mutable_cpu_diff();
     // should be something ike this
-    caffe_cpu_gemv<Dtype>(CblasTrans, this->M_, this->N_, Dtype(1. / this->M_),
+    caffe_cpu_gemv<Dtype>(CblasTrans, this->M_, this->N_, Dtype(1.),
                           hidden[0]->cpu_data(),
                           this->bias_multiplier_.cpu_data(), Dtype(1.),
                           h_bias_diff);
@@ -284,7 +291,7 @@ void RBMInnerProductLayer<Dtype>::Update_cpu(const vector<Blob<Dtype>*>& bottom,
     Dtype* v_bias_diff = this->blobs_[visable_bias_index_]->mutable_cpu_diff();
 
     // should be something ike this
-    caffe_cpu_gemv<Dtype>(CblasTrans, this->M_, this->K_, Dtype(1. / this->M_),
+    caffe_cpu_gemv<Dtype>(CblasTrans, this->M_, this->K_, Dtype(1.),
                           visable[0]->cpu_data(),
                           this->bias_multiplier_.cpu_data(), Dtype(1.),
                           v_bias_diff);
