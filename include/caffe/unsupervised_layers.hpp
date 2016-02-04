@@ -7,6 +7,7 @@
 
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
+#include "caffe/layers/cudnn_conv_layer.hpp"
 #include "caffe/layers/inner_product_layer.hpp"
 #include "caffe/proto/caffe.pb.h"
 
@@ -221,6 +222,111 @@ public GenerativeUnsupervisedLayer<Dtype>, public InnerProductLayer<Dtype> {
  private:
   shared_ptr<SyncedMemory> rng_data_;
 };
+
+#ifdef USE_CUDNN
+/**
+ * @brief Convolutional RBM layer, with both hidden and visable biases
+ * 
+ * TODO: this should be split into RBMConvolutionLayer and RBMCuDNNConvolutionLayer
+ * and you should decide between the two by setting ENGINE. See how the layer factory
+ * does this for the ConvolutionLayer
+ * 
+ * Ok, so this is pretty similar to the RBM layer, except for the fact that we use all
+ * the convolutional stuff.  There are some key differences though:
+ * 
+ * 1) for now we can't clamp the hidden outputs.  This is just to make the implementation
+ *    easier
+ * 
+ * 2) the sampling of hidden units is different, with this stochastic sampling described in
+ *    the paper
+ * 
+ * 3) the hidden biases are a different shape, and we only have one bias per output filter,
+ *    not one bias per output value as before
+ * 
+ * 4) There are no visable biases.  Make sure that your input starts off centered
+ * 
+ * TODO:
+ *   - I divide by batch size in the update a lot in the normal rbm case.  Is this correct?
+ *      -> It is def an error, I need to change this in the normal RBM case
+ *   - Perhaps change visable bias to a 4d tensor, use CUDNN to update and the like
+ *   - I'm reshaping the bias_shape by N_ in the normal RBM case which is wrong!!!
+ *   - What shape should the visable bias have?
+ *   - What shape should be hidden bias have?  -- I think the current shape is wrong
+ *   - is K_ correctly used everywhere?
+ *   - Why is the bias done the way it is hin conv layer?
+ *   - In the latest version of caffe the bias has a different form
+ *     -> also the paper speaks of one bias per filter
+ *   - I think the biases for the visable vectors should also have some sort of a convolutional element
+ */
+template <typename Dtype>
+class RBMCuDNNConvolutionLayer :
+public GenerativeUnsupervisedLayer<Dtype>, public CuDNNConvolutionLayer<Dtype> {
+ public:
+  explicit RBMCuDNNConvolutionLayer(const LayerParameter& param)
+      : GenerativeUnsupervisedLayer<Dtype>(param),
+        CuDNNConvolutionLayer<Dtype>(param),
+        Layer<Dtype>(param) {}
+  virtual ~RBMCuDNNConvolutionLayer() {}
+  virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  virtual void Reshape(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  virtual inline const char* type() const { return "RBMCuDNNConvolutionLayer"; }
+  virtual inline int MinBottomBlobs() const { return 1; }
+  virtual inline int MaxBottomBlobs() const { return 2; }
+  virtual inline int ExactNumBottomBlobs() const { return -1; }
+  virtual inline int MinTopBlobs() const { return 1; }
+  virtual inline int MaxTopBlobs() const { return 3; }
+  virtual inline int ExactNumTopBlobs() const { return -1; }
+  bool forward_is_update_;
+ protected:
+  /**
+   * @brief Use contrastive divergence to find an update step for the weights
+   * @param bottom Input data for the visable layer that will be used for the
+   *        update. Only the first blob is used.
+   * @param top Hidden output of the update.  The first blob is just the result
+   *        of the forward pass, and the second blob has no effect and the last
+   *        if specified contains the absolute reconstruction error of the data
+   */
+  virtual void Update_cpu(const vector<Blob<Dtype>*>& bottom,
+                          const vector<Blob<Dtype>*>& top);
+  
+  virtual void Update_gpu(const vector<Blob<Dtype>*>& bottom,
+                          const vector<Blob<Dtype>*>& top);
+
+  virtual void SampleForward_cpu(const vector<Blob<Dtype>*>& bottom,
+                                 const vector<Blob<Dtype>*>& top);
+
+  virtual void SampleBackward_cpu(const vector<Blob<Dtype>*>& top,
+                                  const vector<Blob<Dtype>*>& bottom);
+
+  virtual void SampleForward_gpu(const vector<Blob<Dtype>*>& bottom,
+                                 const vector<Blob<Dtype>*>& top);
+
+  virtual void SampleBackward_gpu(const vector<Blob<Dtype>*>& top,
+                                  const vector<Blob<Dtype>*>& bottom);
+
+  virtual void Forward_cpu(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  
+  virtual void Forward_gpu(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  
+  virtual void Backward_cpu(const vector<Blob<Dtype>*>& top,
+                            const vector<bool>& propagate_down,
+                            const vector<Blob<Dtype>*>& bottom);
+  
+  virtual void Backward_gpu(const vector<Blob<Dtype>*>& top,
+                            const vector<bool>& propagate_down,
+                            const vector<Blob<Dtype>*>& bottom);
+  
+  int num_sample_steps_for_update_;
+  int pooling_size_;
+  int visable_bias_index_;
+ private:
+  shared_ptr<SyncedMemory> rng_data_;
+};
+#endif
 
 // Update wrapper. You should implement the cpu and
 // gpu specific implementations instead, and should not change these

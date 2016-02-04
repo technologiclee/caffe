@@ -306,7 +306,7 @@ message ParamSpec {
 // NOTE
 // Update the next available ID when you add a new LayerParameter field.
 //
-// LayerParameter next available layer-specific ID: 141 (last added: rbm_inner_product_param)
+// LayerParameter next available layer-specific ID: 142 (last added: rbm_convolution_param)
 message LayerParameter {
   optional string name = 1; // the layer name
   optional string type = 2; // the layer type
@@ -380,6 +380,7 @@ message LayerParameter {
   optional PowerParameter power_param = 122;
   optional PReLUParameter prelu_param = 131;
   optional PythonParameter python_param = 130;
+  optional RBMConvolutionParameter rbm_convolution_param = 141;
   optional RBMInnerProductParameter rbm_inner_product_param = 140;
   optional ReductionParameter reduction_param = 136;
   optional ReLUParameter relu_param = 123;
@@ -749,7 +750,7 @@ message InnerProductParameter {
 message RBMInnerProductParameter {
   // Whether to have a visable bias term (note that the bias term in
   // InnerProduct acts as a hidden bias)
-  optional bool visable_bias_term = 1;
+  optional bool visable_bias_term  = 1 [default = true];
   // Number gibbs sampling iterations to perform during update
   optional uint32 sample_steps_in_update = 2 [default = 1];
   // The filler for the visable bias
@@ -759,6 +760,10 @@ message RBMInnerProductParameter {
     FREE_ENERGY    = 1;
   }
   optional LossMeasure loss_measure = 4 [default = RECONSTRUCTION];
+}
+
+message RBMConvolutionParameter {
+  optional int32 pooling_size = 1 [default = 1];
 }
 
 // Message that stores parameters used by LogLayer

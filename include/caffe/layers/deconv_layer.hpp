@@ -29,7 +29,7 @@ template <typename Dtype>
 class DeconvolutionLayer : public BaseConvolutionLayer<Dtype> {
  public:
   explicit DeconvolutionLayer(const LayerParameter& param)
-      : BaseConvolutionLayer<Dtype>(param) {}
+      : BaseConvolutionLayer<Dtype>(param), Layer<Dtype>(param) {}
 
   virtual inline const char* type() const { return "Deconvolution"; }
 
