@@ -7,6 +7,7 @@
 #include "caffe/util/format.hpp"
 #include "caffe/util/hdf5.hpp"
 #include "caffe/util/io.hpp"
+#include "caffe/util/solver_trace.hpp"
 #include "caffe/util/upgrade_proto.hpp"
 
 namespace caffe {
@@ -23,6 +24,10 @@ SolverAction::Enum Solver<Dtype>::GetRequestedAction() {
     return action_request_function_();
   }
   return SolverAction::NONE;
+}
+template<typename Dtype>
+const TraceDigest& Solver<Dtype>::get_digest() const {
+  return solver_trace_->get_digest();
 }
 
 template <typename Dtype>
@@ -61,6 +66,11 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
   }
   iter_ = 0;
   current_step_ = 0;
+
+  // Add solver trace to root solver
+  if (Caffe::root_solver()) {
+    solver_trace_.reset(new SolverTrace<Dtype>(param, this));
+  }
 }
 
 template <typename Dtype>
@@ -233,6 +243,9 @@ void Solver<Dtype>::Step(int iters) {
       smoothed_loss += (loss - losses[idx]) / average_loss;
       losses[idx] = loss;
     }
+    if (Caffe::root_solver()) {
+      solver_trace_->update_trace_train_loss(loss, smoothed_loss);
+    }
     if (display) {
       LOG_IF(INFO, Caffe::root_solver()) << "Iteration " << iter_
           << ", loss = " << smoothed_loss;
@@ -267,6 +280,11 @@ void Solver<Dtype>::Step(int iters) {
 
     SolverAction::Enum request = GetRequestedAction();
 
+    // Add new information to weight trace
+    if (Caffe::root_solver()) {
+      solver_trace_->update_trace_train(request);
+    }
+
     // Save a snapshot if needed.
     if ((param_.snapshot()
          && iter_ % param_.snapshot() == 0
@@ -295,7 +313,10 @@ void Solver<Dtype>::Solve(const char* resume_file) {
     LOG(INFO) << "Restoring previous solver status from " << resume_file;
     Restore(resume_file);
   }
-
+  // record the trace at iteration == 0
+  if (iter_ == 0) {
+    solver_trace_->update_trace_train(SolverAction::NONE);
+  }
   // For a network that is trained by the solver, no bottom or top vecs
   // should be given, and we will just provide dummy vecs.
   Step(param_.max_iter() - iter_);
@@ -305,6 +326,9 @@ void Solver<Dtype>::Solve(const char* resume_file) {
       && (!param_.snapshot() || iter_ % param_.snapshot() != 0)) {
     Snapshot();
   }
+  // Force a solver trace update
+  solver_trace_->update_trace_train(SolverAction::SNAPSHOT);
+
   if (requested_early_exit_) {
     LOG(INFO) << "Optimization stopped early.";
     return;
@@ -391,6 +415,10 @@ void Solver<Dtype>::Test(const int test_net_id) {
     LOG(INFO)     << "Test interrupted.";
     return;
   }
+  if (param_.test_iter(test_net_id) > 0) {
+    Dtype l = loss / param_.test_iter(test_net_id);
+    solver_trace_->update_trace_test_loss(test_net_id, l);
+  }
   if (param_.test_compute_loss()) {
     loss /= param_.test_iter(test_net_id);
     LOG(INFO) << "Test loss: " << loss;
@@ -408,6 +436,12 @@ void Solver<Dtype>::Test(const int test_net_id) {
     }
     LOG(INFO) << "    Test net output #" << i << ": " << output_name << " = "
               << mean_score << loss_msg_stream.str();
+    solver_trace_->update_trace_test_score(test_net_id, output_name,
+                                           loss_weight, mean_score);
+  }
+  if (param_.has_solver_trace_param() &&
+      param_.solver_trace_param().save_after_test()) {
+    solver_trace_->Save();
   }
 }
 
@@ -472,7 +506,7 @@ string Solver<Dtype>::SnapshotToHDF5() {
 }
 
 template <typename Dtype>
-void Solver<Dtype>::Restore(const char* state_file) {
+void Solver<Dtype>::Restore(const char* state_file, const char* trace_file) {
   CHECK(Caffe::root_solver());
   string state_filename(state_file);
   if (state_filename.size() >= 3 &&
@@ -480,6 +514,10 @@ void Solver<Dtype>::Restore(const char* state_file) {
     RestoreSolverStateFromHDF5(state_filename);
   } else {
     RestoreSolverStateFromBinaryProto(state_filename);
+  }
+  if (trace_file) {
+    string trace_filename(trace_file);
+    solver_trace_->Restore(trace_file);
   }
 }
 
