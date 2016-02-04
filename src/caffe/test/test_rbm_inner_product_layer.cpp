@@ -119,7 +119,7 @@ class RBMInnerProductLayerTest : public MultiDeviceTest<TypeParam> {
     // fill the values
     FillerParameter filler_param;
     filler_param.set_type("gaussian");
-    UniformFiller<Dtype> filler(filler_param);
+    GaussianFiller<Dtype> filler(filler_param);
     filler.Fill(this->blob_bottom_input_);
     blob_bottom_vec_.push_back(blob_bottom_input_);
     blob_top_vec_.push_back(blob_top_input_);
@@ -404,7 +404,7 @@ TYPED_TEST(RBMInnerProductLayerTest, TestSample) {
   EXPECT_GE(this->calculate_overlap(all_visable, all_hidden, probability), .9);
 }
 
-// If the weight starts off in the right spot, is the update zero on average
+// If the weight starts off in the right spot, the update is zero on average
 TYPED_TEST(RBMInnerProductLayerTest, TestZeroUpdate) {
   typedef typename TypeParam::Dtype Dtype;
   Caffe::set_random_seed(1701);
