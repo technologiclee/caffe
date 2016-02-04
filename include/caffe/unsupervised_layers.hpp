@@ -271,15 +271,16 @@ public GenerativeUnsupervisedLayer<Dtype>, public CuDNNConvolutionLayer<Dtype> {
       const vector<Blob<Dtype>*>& top);
   virtual void Reshape(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top);
-  virtual inline const char* type() const { return "RBMCuDNNConvolutionLayer"; }
+  virtual inline const char* type() const { return "RBMCuDNNConvolution"; }
   virtual inline int MinBottomBlobs() const { return 1; }
   virtual inline int MaxBottomBlobs() const { return 2; }
   virtual inline int ExactNumBottomBlobs() const { return -1; }
   virtual inline int MinTopBlobs() const { return 1; }
   virtual inline int MaxTopBlobs() const { return 3; }
   virtual inline int ExactNumTopBlobs() const { return -1; }
-  bool forward_is_update_;
- protected:
+  inline bool get_forward_is_update() const {return forward_is_update_;}
+  inline void set_forward_is_update(bool val){forward_is_update_ = val;}
+protected:
   /**
    * @brief Use contrastive divergence to find an update step for the weights
    * @param bottom Input data for the visable layer that will be used for the
@@ -323,6 +324,8 @@ public GenerativeUnsupervisedLayer<Dtype>, public CuDNNConvolutionLayer<Dtype> {
   int num_sample_steps_for_update_;
   int pooling_size_;
   int visable_bias_index_;
+  int num_errors_;
+  bool forward_is_update_;
  private:
   shared_ptr<SyncedMemory> rng_data_;
 };

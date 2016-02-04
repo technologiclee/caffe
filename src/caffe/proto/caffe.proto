@@ -764,6 +764,7 @@ message RBMInnerProductParameter {
 
 message RBMConvolutionParameter {
   optional int32 pooling_size = 1 [default = 1];
+  optional bool forward_is_update = 2 [default = true];
 }
 
 // Message that stores parameters used by LogLayer

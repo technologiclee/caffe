@@ -254,12 +254,12 @@ void squash_diff(const vector<Blob<Dtype>*>& bottom) {
 }
 
 template <typename Dtype>
-void multinomial_squash(Blob<Dtype>* blob_in, int pooling_size) {
+void multinomial_squash(const Blob<Dtype>* blob_in, int pooling_size, Blob<Dtype>* blob_out) {
   const int width_out  = blob_in->shape(3);
   const int count      = blob_in->count() / (pooling_size * pooling_size);
   // NOLINT_NEXT_LINE(whitespace/operators)
   MultinomialKernel<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
-    count, pooling_size, width_out, blob_in->gpu_data(), blob_in->mutable_gpu_data());
+    count, pooling_size, width_out, blob_in->gpu_data(), blob_out->mutable_gpu_data());
   CUDA_POST_KERNEL_CHECK;
 }
 
@@ -273,6 +273,10 @@ void RBMCuDNNConvolutionLayer<Dtype>::Forward_gpu(
     my_bot[0] = bottom[0];
     my_top[0] = top[0];
     ConvolutionLayer<Dtype>::Forward_gpu(my_bot, my_top);
+    if (top.size() > 1 + num_errors_) {
+      multinomial_squash(top[0], pooling_size_, top[1]);
+      stochastic_samples_precalc(top[1], static_cast<Dtype*>(rng_data_->mutable_gpu_data()), this->pooling_size_, top[1]);
+    }
   }
 }
 
@@ -368,8 +372,8 @@ void RBMCuDNNConvolutionLayer<Dtype>::Update_gpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   
   Dtype* error_vector = 0;
-  if (top.size() > 1) {
-    error_vector = top[1]->mutable_cpu_data();
+  if (num_errors_ > 0) {
+    error_vector = top[top.size()-1]->mutable_cpu_data();
   }
   // set up the vectors that hold the hidden data
   vector<Blob<Dtype>*> hidden(0);
@@ -384,7 +388,7 @@ void RBMCuDNNConvolutionLayer<Dtype>::Update_gpu(
   
   //during backwards pass we'll rewrite visable, so set it to a local variable
   visable[0] = &visable_samp;
-  multinomial_squash(hidden[0], pooling_size_);
+  multinomial_squash(hidden[0], pooling_size_, hidden[0]);
 
   for (int g = 0; g < this->group_; g++) {
     // update the bias diffs with \delta b -= P(h | v_0)
@@ -451,7 +455,7 @@ void RBMCuDNNConvolutionLayer<Dtype>::Update_gpu(
     SampleBackward_gpu(hidden, visable);
   }
   CuDNNConvolutionLayer<Dtype>::Forward_gpu(visable, hidden);
-  multinomial_squash(hidden[0], pooling_size_);
+  multinomial_squash(hidden[0], pooling_size_, hidden[0]);
 
   for (int g = 0; g < this->group_; g++) {
     // update the bias diffs with \delta b += P(h | v_1)

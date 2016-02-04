@@ -90,6 +90,10 @@ void RBMCuDNNConvolutionLayer<Dtype>::LayerSetUp(
   this->visable_bias_term_ =
     this->layer_param_.rbm_inner_product_param().visable_bias_term();
   CuDNNConvolutionLayer<Dtype>::LayerSetUp(my_bot, my_top);
+  //num_errors_ = this->layer_param_.rbm_inner_product_param().loss_measure_size();
+  num_errors_ = int(this->layer_param_.rbm_inner_product_param().has_loss_measure());
+  CHECK_LE(top.size(), 3 + num_errors_) << "top is errors plus presqaush, squash and sample";
+  
   num_sample_steps_for_update_ =
     this->layer_param_.rbm_inner_product_param().sample_steps_in_update();
   pooling_size_ = this->layer_param_.rbm_convolution_param().pooling_size();
@@ -108,7 +112,7 @@ void RBMCuDNNConvolutionLayer<Dtype>::LayerSetUp(
   // number of inputs
   const int max_count = std::max(bottom[0]->count(), top[0]->count());
   rng_data_.reset(new SyncedMemory(max_count * sizeof(Dtype)));
-  forward_is_update_ = true;
+  forward_is_update_ = this->layer_param_.rbm_convolution_param().forward_is_update();
 }
 
 template <typename Dtype>
@@ -118,6 +122,10 @@ void RBMCuDNNConvolutionLayer<Dtype>::Reshape(
   my_bot[0] = bottom[0];
   my_top[0] = top[0];
   CuDNNConvolutionLayer<Dtype>::Reshape(my_bot, my_top);
+  // shape the extra top blobs to what they should be
+  for (int i = 1; i < top.size() - num_errors_; ++i) {
+    top[i]->Reshape(top[0]->shape());
+  }
   const int height_out = top[0]->shape(this->channel_axis_ + 1);
   const int width_out = top[0]->shape(this->channel_axis_ + 2);
   CHECK_EQ(height_out % pooling_size_, 0) 
@@ -126,21 +134,20 @@ void RBMCuDNNConvolutionLayer<Dtype>::Reshape(
     << "output width (" << width_out << ") must be divisable by pooling size (" << pooling_size_ << ")";
   
   // Here, any top is the reconstruction error  
-  if (top.size() > 1) {
+  if (num_errors_) {
     vector<int> blob_shape(2,1);
     switch(this->layer_param_.rbm_inner_product_param().loss_measure()) {
     case RBMInnerProductParameter_LossMeasure_RECONSTRUCTION:
-      top[1]->ReshapeLike(*bottom[0]);
+      top[top.size()-1]->ReshapeLike(*bottom[0]);
       break;
     case RBMInnerProductParameter_LossMeasure_FREE_ENERGY:
       blob_shape[0] = this->num_;  // num_ is batch size
-      top[1]->Reshape(blob_shape);
+      top[top.size()-1]->Reshape(blob_shape);
       break;
     default:
       LOG(FATAL) << "Unknown loss measure: "
         << this->layer_param_.rbm_inner_product_param().loss_measure();
     }
-    CHECK_LE(top.size(), 2);
   }
   const int max_count = std::max(bottom[0]->count(), top[0]->count());
   if (max_count * sizeof(Dtype) > rng_data_->size()) {

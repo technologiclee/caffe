@@ -72,10 +72,10 @@ Dtype calculate_energy(const shared_ptr<Blob<Dtype> >& visable_vector,
   output_vector.push_back(&output_blob);
   vector<Blob<Dtype>* > input_vector;
   input_vector.push_back(visable_vector.get());
-  bool starting_fiu = layer.forward_is_update_;
-  layer.forward_is_update_ = false;
+  bool starting_fiu = layer.get_forward_is_update();
+  layer.set_forward_is_update(false);
   layer.Forward(input_vector, output_vector);
-  layer.forward_is_update_ = starting_fiu;
+  layer.set_forward_is_update(starting_fiu);
   // multiply matrix product result with hidden vector (which has the fancy pooling going on)
   Dtype matrix_sum = caffe_cpu_dot(hidden_vector->count(),
                       output_vector[0]->cpu_data(), hidden_vector->cpu_data());
@@ -355,7 +355,7 @@ TYPED_TEST(RBMCuDNNConvolutionLayerTest, TestZeroUpdate) {
   }
 
   vector<int> multi = multinomial(num_samples, probability);
-  this->layer_->forward_is_update_ = true;
+  this->layer_->set_forward_is_update(true);
   // Do a bunch of updates, adding the update to the diff
   switch (Caffe::mode()) {
   case Caffe::CPU:
