@@ -41,6 +41,7 @@ class ImageDataLayerTest : public MultiDeviceTest<TypeParam> {
     MakeTempFilename(&filename_reshape_);
     std::ofstream reshapefile(filename_reshape_.c_str(), std::ofstream::out);
     LOG(INFO) << "Using temporary file " << filename_reshape_;
+    reshapefile << "# Comment line." << std::endl;
     reshapefile << EXAMPLES_SOURCE_DIR "images/cat.jpg " << 0 << std::endl;
     reshapefile << EXAMPLES_SOURCE_DIR "images/fish-bike.jpg " << 1
                 << std::endl;

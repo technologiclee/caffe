@@ -46,16 +46,22 @@ void ImageDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   string line;
   while (std::getline(infile, line)) {
     std::istringstream iss(line);
+
+    // Check if this is a comment line
+    if (iss.peek() == '#') continue;
+
     iss >> filename;
+    vector<vector<int> > labels(2);
+    int total_labels = 0;
 
-    vector<int> labels[2];
-
-    for (int v = 0; v < 2; ++v) {
+    for (int v = 0; v < labels.size(); ++v) {
       while (iss >> label) {
         if (label > max_label_id) {
           max_label_id = label;
         }
         labels[v].push_back(label);
+        total_labels++;
+
         // Check for the list separator.
         if (iss.peek() == ',') {
           iss.ignore();
@@ -70,7 +76,7 @@ void ImageDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
 
     // The example is multi-label if more than one label has been specified per
     // line (this includes ignore labels).
-    if (labels[0].size() + labels[1].size() > 1) {
+    if (total_labels > 1) {
       is_multi_label = true;
     }
 
