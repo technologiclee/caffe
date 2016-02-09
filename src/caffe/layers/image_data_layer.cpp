@@ -40,26 +40,38 @@ void ImageDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   string filename;
   int label;
 
-  int max_label_id = 0;
+  int max_label_id = num_labels_per_line_;
   bool is_multi_label = false;
 
   string line;
   while (std::getline(infile, line)) {
-    vector<int> labels;
     std::istringstream iss(line);
-
     iss >> filename;
 
-    while (iss >> label) {
-      if (label > max_label_id) {
-        max_label_id = label;
+    vector<int> labels[2];
+
+    for (int v = 0; v < 2; ++v) {
+      while (iss >> label) {
+        if (label > max_label_id) {
+          max_label_id = label;
+        }
+        labels[v].push_back(label);
+        // Check for the label and ignore list separator.
+        if (iss.peek() == ';') {
+          iss.ignore();
+          break;
+        }
       }
-      labels.push_back(label);
     }
-    if (labels.size() > 1) {
+
+    // The example is multi-label if more than one label has been specified per
+    // line (this includes ignore labels).
+    if (labels[0].size() + labels[1].size() > 1) {
       is_multi_label = true;
     }
-    lines_.push_back(std::make_pair(filename, labels));
+
+    lines_.push_back(
+        std::make_pair(filename, std::make_pair(labels[0], labels[1])));
   }
 
   if (is_multi_label) {
@@ -172,11 +184,16 @@ void ImageDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     trans_time += timer.MicroSeconds();
 
     if (num_labels_per_line_ == 1) {
-      prefetch_label[item_id] = lines_[lines_id_].second[0];
+      prefetch_label[item_id] = lines_[lines_id_].second.first[0];
     } else {
       int label_offset = batch->label_.offset(item_id);
-      for (int l = 0; l < lines_[lines_id_].second.size(); ++l) {
-        prefetch_label[label_offset + lines_[lines_id_].second[l]] = 1;
+      // Set the labels
+      for (int l = 0; l < lines_[lines_id_].second.first.size(); ++l) {
+        prefetch_label[label_offset + lines_[lines_id_].second.first[l]] = 1;
+      }
+      // Set the ignore labels
+      for (int l = 0; l < lines_[lines_id_].second.second.size(); ++l) {
+        prefetch_label[label_offset + lines_[lines_id_].second.second[l]] = -1;
       }
     }
 

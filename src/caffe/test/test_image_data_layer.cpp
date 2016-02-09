@@ -56,6 +56,28 @@ class ImageDataLayerTest : public MultiDeviceTest<TypeParam> {
     multifile << EXAMPLES_SOURCE_DIR "images/fish-bike.jpg " << 1 << " " << 9
               << std::endl;
     multifile.close();
+
+    // Create test input file for multi label with ignore.
+    MakeTempFilename(&filename_ignore_label_);
+    std::ofstream ignorefile(filename_ignore_label_.c_str(),
+                             std::ofstream::out);
+    LOG(INFO) << "Using temporary file " << filename_ignore_label_;
+    ignorefile << EXAMPLES_SOURCE_DIR "images/cat.jpg " << 0 << ";" << 9 << " "
+               << 1 << std::endl;
+    ignorefile << EXAMPLES_SOURCE_DIR "images/fish-bike.jpg " << 1 << " " << 9
+               << std::endl;
+    ignorefile.close();
+
+    // Create test input file for single label with ignore.
+    MakeTempFilename(&filename_single_ignore_label_);
+    std::ofstream singleignorefile(filename_single_ignore_label_.c_str(),
+                             std::ofstream::out);
+    LOG(INFO) << "Using temporary file " << filename_single_ignore_label_;
+    singleignorefile << EXAMPLES_SOURCE_DIR "images/cat.jpg " << 0 << ";" << 9
+               << std::endl;
+    singleignorefile << EXAMPLES_SOURCE_DIR "images/fish-bike.jpg " << 1
+                     << std::endl;
+    singleignorefile.close();
   }
 
   virtual ~ImageDataLayerTest() {
@@ -67,6 +89,8 @@ class ImageDataLayerTest : public MultiDeviceTest<TypeParam> {
   string filename_;
   string filename_reshape_;
   string filename_multi_label_;
+  string filename_ignore_label_;
+  string filename_single_ignore_label_;
   Blob<Dtype>* const blob_top_data_;
   Blob<Dtype>* const blob_top_label_;
   vector<Blob<Dtype>*> blob_bottom_vec_;
@@ -232,6 +256,91 @@ TYPED_TEST(ImageDataLayerTest, TestMultiLabel) {
       expected = 1;
     }
     EXPECT_EQ(this->blob_top_label_->data_at(0, i, 0, 0), expected);
+  }
+}
+
+
+TYPED_TEST(ImageDataLayerTest, TestMultiLabelIgnore) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter param;
+  ImageDataParameter* image_data_param = param.mutable_image_data_param();
+  image_data_param->set_batch_size(2);
+  image_data_param->set_new_height(256);
+  image_data_param->set_new_width(256);
+  image_data_param->set_source(this->filename_ignore_label_.c_str());
+  image_data_param->set_shuffle(false);
+  ImageDataLayer<Dtype> layer(param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  EXPECT_EQ(this->blob_top_label_->num(), 2);
+  EXPECT_EQ(this->blob_top_label_->channels(), 10);
+  EXPECT_EQ(this->blob_top_label_->height(), 1);
+  EXPECT_EQ(this->blob_top_label_->width(), 1);
+  // cat.jpg
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  EXPECT_EQ(this->blob_top_data_->num(), 2);
+  EXPECT_EQ(this->blob_top_data_->channels(), 3);
+  EXPECT_EQ(this->blob_top_data_->height(), 256);
+  EXPECT_EQ(this->blob_top_data_->width(), 256);
+  // Check that the cat label (0) has been set.
+  for (int i = 0; i < this->blob_top_label_->channels(); ++i) {
+    int expected = 0;
+    if (i == 0) {
+      expected = 1;
+    } else if (i == 1 || i == 9) {
+      expected = -1;
+    }
+    EXPECT_EQ(this->blob_top_label_->data_at(0, i, 0, 0), expected);
+  }
+
+  // fish-bike.jpg
+  for (int i = 0; i < this->blob_top_label_->channels(); ++i) {
+    int expected = 0;
+    if (i == 1 || i == 9) {
+      expected = 1;
+    }
+    EXPECT_EQ(this->blob_top_label_->data_at(1, i, 0, 0), expected);
+  }
+}
+
+TYPED_TEST(ImageDataLayerTest, TestSingleIgnore) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter param;
+  ImageDataParameter* image_data_param = param.mutable_image_data_param();
+  image_data_param->set_batch_size(2);
+  image_data_param->set_new_height(256);
+  image_data_param->set_new_width(256);
+  image_data_param->set_source(this->filename_single_ignore_label_.c_str());
+  image_data_param->set_shuffle(false);
+  ImageDataLayer<Dtype> layer(param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  EXPECT_EQ(this->blob_top_label_->num(), 2);
+  EXPECT_EQ(this->blob_top_label_->channels(), 10);
+  EXPECT_EQ(this->blob_top_label_->height(), 1);
+  EXPECT_EQ(this->blob_top_label_->width(), 1);
+  // cat.jpg
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  EXPECT_EQ(this->blob_top_data_->num(), 2);
+  EXPECT_EQ(this->blob_top_data_->channels(), 3);
+  EXPECT_EQ(this->blob_top_data_->height(), 256);
+  EXPECT_EQ(this->blob_top_data_->width(), 256);
+  // Check that the cat label (0) has been set.
+  for (int i = 0; i < this->blob_top_label_->channels(); ++i) {
+    int expected = 0;
+    if (i == 0) {
+      expected = 1;
+    } else if (i == 9) {
+      expected = -1;
+    }
+    EXPECT_EQ(this->blob_top_label_->data_at(0, i, 0, 0), expected);
+  }
+
+  // fish-bike.jpg
+  for (int i = 0; i < this->blob_top_label_->channels(); ++i) {
+    int expected = 0;
+    if (i == 1) {
+      expected = 1;
+    }
+    EXPECT_EQ(this->blob_top_label_->data_at(1, i, 0, 0), expected);
   }
 }
 
