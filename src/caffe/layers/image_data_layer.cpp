@@ -39,8 +39,33 @@ void ImageDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   std::ifstream infile(source.c_str());
   string filename;
   int label;
-  while (infile >> filename >> label) {
-    lines_.push_back(std::make_pair(filename, label));
+
+  int max_label_id = 0;
+  bool is_multi_label = false;
+
+  string line;
+  while (std::getline(infile, line)) {
+    vector<int> labels;
+    std::istringstream iss(line);
+
+    iss >> filename;
+
+    while (iss >> label) {
+      if (label > max_label_id) {
+        max_label_id = label;
+      }
+      labels.push_back(label);
+    }
+    if (labels.size() > 1) {
+      is_multi_label = true;
+    }
+    lines_.push_back(std::make_pair(filename, labels));
+  }
+
+  if (is_multi_label) {
+    num_labels_per_line_ = max_label_id + 1;
+  } else {
+    num_labels_per_line_ = 1;
   }
 
   if (this->layer_param_.image_data_param().shuffle()) {
@@ -81,7 +106,9 @@ void ImageDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
       << top[0]->channels() << "," << top[0]->height() << ","
       << top[0]->width();
   // label
-  vector<int> label_shape(1, batch_size);
+  vector<int> label_shape(2);
+  label_shape[0] = batch_size;
+  label_shape[1] = num_labels_per_line_;
   top[1]->Reshape(label_shape);
   for (int i = 0; i < this->PREFETCH_COUNT; ++i) {
     this->prefetch_[i].label_.Reshape(label_shape);
@@ -144,7 +171,15 @@ void ImageDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     this->data_transformer_->Transform(cv_img, &(this->transformed_data_));
     trans_time += timer.MicroSeconds();
 
-    prefetch_label[item_id] = lines_[lines_id_].second;
+    if (num_labels_per_line_ == 1) {
+      prefetch_label[item_id] = lines_[lines_id_].second[0];
+    } else {
+      int label_offset = batch->label_.offset(item_id);
+      for (int l = 0; l < lines_[lines_id_].second.size(); ++l) {
+        prefetch_label[label_offset + lines_[lines_id_].second[l]] = 1;
+      }
+    }
+
     // go to the next iter
     lines_id_++;
     if (lines_id_ >= lines_size) {

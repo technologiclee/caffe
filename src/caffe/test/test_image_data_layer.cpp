@@ -34,16 +34,28 @@ class ImageDataLayerTest : public MultiDeviceTest<TypeParam> {
     std::ofstream outfile(filename_.c_str(), std::ofstream::out);
     LOG(INFO) << "Using temporary file " << filename_;
     for (int i = 0; i < 5; ++i) {
-      outfile << EXAMPLES_SOURCE_DIR "images/cat.jpg " << i;
+      outfile << EXAMPLES_SOURCE_DIR "images/cat.jpg " << i << std::endl;
     }
     outfile.close();
     // Create test input file for images of distinct sizes.
     MakeTempFilename(&filename_reshape_);
     std::ofstream reshapefile(filename_reshape_.c_str(), std::ofstream::out);
     LOG(INFO) << "Using temporary file " << filename_reshape_;
-    reshapefile << EXAMPLES_SOURCE_DIR "images/cat.jpg " << 0;
-    reshapefile << EXAMPLES_SOURCE_DIR "images/fish-bike.jpg " << 1;
+    reshapefile << EXAMPLES_SOURCE_DIR "images/cat.jpg " << 0 << std::endl;
+    reshapefile << EXAMPLES_SOURCE_DIR "images/fish-bike.jpg " << 1
+                << std::endl;
     reshapefile.close();
+
+    // Create test input file for multi label input files.
+    MakeTempFilename(&filename_multi_label_);
+    std::ofstream multifile(filename_multi_label_.c_str(), std::ofstream::out);
+    LOG(INFO) << "Using temporary file " << filename_multi_label_;
+    // A cat has a single label
+    multifile << EXAMPLES_SOURCE_DIR "images/cat.jpg " << 0 << std::endl;
+    // Fish-bike is both a fish and a bike.
+    multifile << EXAMPLES_SOURCE_DIR "images/fish-bike.jpg " << 1 << " " << 9
+              << std::endl;
+    multifile.close();
   }
 
   virtual ~ImageDataLayerTest() {
@@ -54,6 +66,7 @@ class ImageDataLayerTest : public MultiDeviceTest<TypeParam> {
   int seed_;
   string filename_;
   string filename_reshape_;
+  string filename_multi_label_;
   Blob<Dtype>* const blob_top_data_;
   Blob<Dtype>* const blob_top_label_;
   vector<Blob<Dtype>*> blob_bottom_vec_;
@@ -174,6 +187,51 @@ TYPED_TEST(ImageDataLayerTest, TestShuffle) {
     }
     EXPECT_EQ(5, values_to_indices.size());
     EXPECT_GT(5, num_in_order);
+  }
+}
+
+
+TYPED_TEST(ImageDataLayerTest, TestMultiLabel) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter param;
+  ImageDataParameter* image_data_param = param.mutable_image_data_param();
+  image_data_param->set_batch_size(1);
+  image_data_param->set_source(this->filename_multi_label_.c_str());
+  image_data_param->set_shuffle(false);
+  ImageDataLayer<Dtype> layer(param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  EXPECT_EQ(this->blob_top_label_->num(), 1);
+  EXPECT_EQ(this->blob_top_label_->channels(), 10);
+  EXPECT_EQ(this->blob_top_label_->height(), 1);
+  EXPECT_EQ(this->blob_top_label_->width(), 1);
+  // cat.jpg
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  EXPECT_EQ(this->blob_top_data_->num(), 1);
+  EXPECT_EQ(this->blob_top_data_->channels(), 3);
+  EXPECT_EQ(this->blob_top_data_->height(), 360);
+  EXPECT_EQ(this->blob_top_data_->width(), 480);
+  // Check that the cat label (0) has been set.
+  for (int i = 0; i < this->blob_top_label_->channels(); ++i) {
+    int expected = 0;
+    if (i == 0) {
+      expected = 1;
+    }
+    EXPECT_EQ(this->blob_top_label_->data_at(0, i, 0, 0), expected);
+  }
+
+  // fish-bike.jpg
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  EXPECT_EQ(this->blob_top_data_->num(), 1);
+  EXPECT_EQ(this->blob_top_data_->channels(), 3);
+  EXPECT_EQ(this->blob_top_data_->height(), 323);
+  EXPECT_EQ(this->blob_top_data_->width(), 481);
+  // Check that the fish and bike label has been set.
+  for (int i = 0; i < this->blob_top_label_->channels(); ++i) {
+    int expected = 0;
+    if (i == 1 || i == 9) {
+      expected = 1;
+    }
+    EXPECT_EQ(this->blob_top_label_->data_at(0, i, 0, 0), expected);
   }
 }
 
