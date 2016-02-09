@@ -56,6 +56,10 @@ void ImageDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
           max_label_id = label;
         }
         labels[v].push_back(label);
+        // Check for the list separator.
+        if (iss.peek() == ',') {
+          iss.ignore();
+        }
         // Check for the label and ignore list separator.
         if (iss.peek() == ';') {
           iss.ignore();
