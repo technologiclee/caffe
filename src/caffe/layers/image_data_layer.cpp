@@ -40,7 +40,7 @@ void ImageDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   string filename;
   int label;
 
-  int max_label_id = num_labels_per_line_;
+  int max_label_id = 0;
   bool is_multi_label = false;
 
   string line;
