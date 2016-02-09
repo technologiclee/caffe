@@ -53,8 +53,10 @@ class ImageDataLayerTest : public MultiDeviceTest<TypeParam> {
     LOG(INFO) << "Using temporary file " << filename_multi_label_;
     // A cat has a single label
     multifile << EXAMPLES_SOURCE_DIR "images/cat.jpg " << 0 << std::endl;
-    // Fish-bike is both a fish and a bike.
+    // Fish-bike is both a fish and a bike (with various separation options.
     multifile << EXAMPLES_SOURCE_DIR "images/fish-bike.jpg " << 1 << " " << 9
+              << std::endl;
+    multifile << EXAMPLES_SOURCE_DIR "images/fish-bike.jpg " << 1 << "," << 9
               << std::endl;
     multifile.close();
 
@@ -244,19 +246,21 @@ TYPED_TEST(ImageDataLayerTest, TestMultiLabel) {
     EXPECT_EQ(this->blob_top_label_->data_at(0, i, 0, 0), expected);
   }
 
-  // fish-bike.jpg
-  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
-  EXPECT_EQ(this->blob_top_data_->num(), 1);
-  EXPECT_EQ(this->blob_top_data_->channels(), 3);
-  EXPECT_EQ(this->blob_top_data_->height(), 323);
-  EXPECT_EQ(this->blob_top_data_->width(), 481);
-  // Check that the fish and bike label has been set.
-  for (int i = 0; i < this->blob_top_label_->channels(); ++i) {
-    int expected = 0;
-    if (i == 1 || i == 9) {
-      expected = 1;
+  for (int j = 0; j < 2; ++j) {
+    // fish-bike.jpg
+    layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+    EXPECT_EQ(this->blob_top_data_->num(), 1);
+    EXPECT_EQ(this->blob_top_data_->channels(), 3);
+    EXPECT_EQ(this->blob_top_data_->height(), 323);
+    EXPECT_EQ(this->blob_top_data_->width(), 481);
+    // Check that the fish and bike label has been set.
+    for (int i = 0; i < this->blob_top_label_->channels(); ++i) {
+      int expected = 0;
+      if (i == 1 || i == 9) {
+        expected = 1;
+      }
+      EXPECT_EQ(this->blob_top_label_->data_at(0, i, 0, 0), expected);
     }
-    EXPECT_EQ(this->blob_top_label_->data_at(0, i, 0, 0), expected);
   }
 }
 
