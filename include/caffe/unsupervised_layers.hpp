@@ -276,8 +276,8 @@ public GenerativeUnsupervisedLayer<Dtype>, public CuDNNConvolutionLayer<Dtype> {
   virtual inline int MaxBottomBlobs() const { return 2; }
   virtual inline int ExactNumBottomBlobs() const { return -1; }
   virtual inline int MinTopBlobs() const { return 1; }
-  virtual inline int MaxTopBlobs() const { return 3; }
   virtual inline int ExactNumTopBlobs() const { return -1; }
+  virtual inline bool EqualNumBottomTopBlobs() const { return false; }
   inline bool get_forward_is_update() const {return forward_is_update_;}
   inline void set_forward_is_update(bool val){forward_is_update_ = val;}
 protected:

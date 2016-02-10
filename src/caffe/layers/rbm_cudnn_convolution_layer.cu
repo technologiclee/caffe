@@ -1,4 +1,3 @@
-#include <numeric>
 #include <thrust/device_ptr.h>
 #include <thrust/reduce.h>
 #include <thrust/system/cuda/execution_policy.h>
@@ -11,6 +10,7 @@
 #include "caffe/filler.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/unsupervised_layers.hpp"
+#include "caffe/util/benchmark.hpp"
 #include "caffe/util/im2col.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/layers/cudnn_conv_layer.hpp"
@@ -176,7 +176,7 @@ __global__ void CompareKernel(const int n,
 
 /** @brief overwrite the data with samples after calculating multinomial distibution */
 template <typename Dtype>
-inline void stochastic_samples(const Blob<Dtype>* blob_in,
+inline void stochastic_samples_gpu(const Blob<Dtype>* blob_in,
                                Dtype* uniform_sample,
                                int pooling_size,
                                Blob<Dtype>* blob_out) {
@@ -197,7 +197,7 @@ inline void stochastic_samples(const Blob<Dtype>* blob_in,
 
 /** @brief overwrite the data with samples with precalculated multinomial distribution */
 template <typename Dtype>
-inline void stochastic_samples_precalc(const Blob<Dtype>* blob_in,
+inline void stochastic_samples_precalc_gpu(const Blob<Dtype>* blob_in,
                                Dtype* uniform_sample,
                                int pooling_size,
                                Blob<Dtype>* blob_out) {
@@ -218,7 +218,7 @@ inline void stochastic_samples_precalc(const Blob<Dtype>* blob_in,
 
 /** @brief use probabilities from probs to create samples writen to samps */
 template <typename Dtype>
-inline void make_samples_from_diff(Blob<Dtype>* probs, Blob<Dtype>* samps, Dtype* uniform_sample) {
+inline void make_samples_from_diff_gpu(Blob<Dtype>* probs, Blob<Dtype>* samps, Dtype* uniform_sample) {
   CHECK_EQ(probs->count(), samps->count());
   const Dtype* prob_data = probs->gpu_diff();
   Dtype* samp_data = samps->mutable_gpu_data();
@@ -236,16 +236,7 @@ inline void make_samples_from_diff(Blob<Dtype>* probs, Blob<Dtype>* samps, Dtype
 }
 
 template <typename Dtype>
-void squash(const vector<Blob<Dtype>*>& top) {
-  const int count = top[0]->count();
-  // NOLINT_NEXT_LINE(whitespace/operators)
-  SigmoidKernel<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
-    count, top[0]->mutable_gpu_data());
-  CUDA_POST_KERNEL_CHECK;
-}
-
-template <typename Dtype>
-void squash_diff(const vector<Blob<Dtype>*>& bottom) {
+void squash_diff_gpu(const vector<Blob<Dtype>*>& bottom) {
   const int count = bottom[0]->count();
   // NOLINT_NEXT_LINE(whitespace/operators)
   SigmoidKernel<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
@@ -254,7 +245,7 @@ void squash_diff(const vector<Blob<Dtype>*>& bottom) {
 }
 
 template <typename Dtype>
-void multinomial_squash(const Blob<Dtype>* blob_in, int pooling_size, Blob<Dtype>* blob_out) {
+void multinomial_squash_gpu(const Blob<Dtype>* blob_in, int pooling_size, Blob<Dtype>* blob_out) {
   const int width_out  = blob_in->shape(3);
   const int count      = blob_in->count() / (pooling_size * pooling_size);
   // NOLINT_NEXT_LINE(whitespace/operators)
@@ -266,6 +257,7 @@ void multinomial_squash(const Blob<Dtype>* blob_in, int pooling_size, Blob<Dtype
 template <typename Dtype>
 void RBMCuDNNConvolutionLayer<Dtype>::Forward_gpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
+  
   if (forward_is_update_) {
     Update_gpu(bottom, top);
   } else {
@@ -274,8 +266,10 @@ void RBMCuDNNConvolutionLayer<Dtype>::Forward_gpu(
     my_top[0] = top[0];
     ConvolutionLayer<Dtype>::Forward_gpu(my_bot, my_top);
     if (top.size() > 1 + num_errors_) {
-      multinomial_squash(top[0], pooling_size_, top[1]);
-      stochastic_samples_precalc(top[1], static_cast<Dtype*>(rng_data_->mutable_gpu_data()), this->pooling_size_, top[1]);
+      multinomial_squash_gpu(top[0], pooling_size_, top[1]);
+      if (top.size() > 2 + num_errors_) {
+        stochastic_samples_precalc_gpu(top[1], static_cast<Dtype*>(rng_data_->mutable_gpu_data()), this->pooling_size_, top[2]);
+      }
     }
   }
 }
@@ -316,47 +310,21 @@ void RBMCuDNNConvolutionLayer<Dtype>::SampleForward_gpu(
   my_top.push_back(top[0]);
 
   CuDNNConvolutionLayer<Dtype>::Forward_gpu(my_bot, my_top);
-  stochastic_samples(top[0], static_cast<Dtype*>(rng_data_->mutable_gpu_data()), pooling_size_, top[0]);
+  stochastic_samples_gpu(top[0], static_cast<Dtype*>(rng_data_->mutable_gpu_data()), pooling_size_, top[0]);
 }
 
 template <typename Dtype>
 void RBMCuDNNConvolutionLayer<Dtype>::SampleBackward_gpu(
     const vector<Blob<Dtype>*>& top, const vector<Blob<Dtype>*>& bottom) {
   vector<bool> prop_down;  // dummy variable
-  this->Backward_cpu(top, prop_down, bottom);
-  squash_diff(bottom);
-  make_samples_from_diff(bottom[0], bottom[0], static_cast<Dtype*>(rng_data_->mutable_gpu_data()));
-}
-
-template<typename Dtype>
-__global__ void reduce_kernel(const int n, const int step, const Dtype* first, Dtype* data_out, const Dtype* alpha)
-{
-  CUDA_KERNEL_LOOP(index, n) {
-    data_out[index] = *alpha * thrust::reduce(thrust::cuda::par, first + index * step, first + (index + 1) * step, Dtype(0.), thrust::plus<Dtype>());
-  }
-}
-
-template<typename Dtype>
-__global__ void reduce_kernel(const int n, const int step, const Dtype* first, Dtype* data_out)
-{
-  CUDA_KERNEL_LOOP(index, n) {
-    data_out[index] += thrust::reduce(thrust::cuda::par, first + index * step, first + (index + 1) * step, Dtype(0.), thrust::plus<Dtype>());
-  }
-}
-
-template<typename Dtype>
-__global__ void subtract_kernel(const int n, const int step, const Dtype* first, Dtype* data_out, const Dtype* alpha)
-{
-  CUDA_KERNEL_LOOP(index, n) {
-    data_out[index] -= *alpha * thrust::reduce(thrust::cuda::par, first + index * step, first + (index + 1) * step, Dtype(0.), thrust::plus<Dtype>());
-  }
-}
-
-template<typename Dtype>
-__global__ void subtract_kernel(const int n, const int step, const Dtype* first, Dtype* data_out)
-{
-  CUDA_KERNEL_LOOP(index, n) {
-    data_out[index] -= thrust::reduce(thrust::cuda::par, first + index * step, first + (index + 1) * step, Dtype(0.), thrust::plus<Dtype>());
+  this->Backward_gpu(top, prop_down, bottom);
+  if(true) {
+  caffe_gpu_rng_gaussian(bottom[0]->count(), Dtype(0), Dtype(1.), static_cast<Dtype*>(bottom[0]->mutable_gpu_data()));
+  //caffe_gpu_axpy(bottom[0]->count(), Dtype(1.), static_cast<const Dtype*>(rng_data_->gpu_data()), bottom[0]->mutable_gpu_data());
+  caffe_gpu_axpy(bottom[0]->count(), Dtype(1.), bottom[0]->gpu_diff(), bottom[0]->mutable_gpu_data());
+  } else {
+  squash_diff_gpu(bottom);
+  make_samples_from_diff_gpu(bottom[0], bottom[0], static_cast<Dtype*>(rng_data_->mutable_gpu_data()));
   }
 }
 
@@ -370,10 +338,9 @@ __global__ void mult_add(const int n, const Dtype* data_in, const Dtype alpha, D
 template <typename Dtype>
 void RBMCuDNNConvolutionLayer<Dtype>::Update_gpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
-  
   Dtype* error_vector = 0;
   if (num_errors_ > 0) {
-    error_vector = top[top.size()-1]->mutable_cpu_data();
+    error_vector = top[top.size()-1]->mutable_gpu_data();
   }
   // set up the vectors that hold the hidden data
   vector<Blob<Dtype>*> hidden(0);
@@ -388,7 +355,7 @@ void RBMCuDNNConvolutionLayer<Dtype>::Update_gpu(
   
   //during backwards pass we'll rewrite visable, so set it to a local variable
   visable[0] = &visable_samp;
-  multinomial_squash(hidden[0], pooling_size_, hidden[0]);
+  multinomial_squash_gpu(hidden[0], pooling_size_, hidden[0]);
 
   for (int g = 0; g < this->group_; g++) {
     // update the bias diffs with \delta b -= P(h | v_0)
@@ -428,7 +395,7 @@ void RBMCuDNNConvolutionLayer<Dtype>::Update_gpu(
   }
 
   //now sample the probabilites of the hidden layer
-  stochastic_samples_precalc(hidden[0], static_cast<Dtype*>(rng_data_->mutable_gpu_data()), this->pooling_size_, hidden[0]);
+  stochastic_samples_precalc_gpu(hidden[0], static_cast<Dtype*>(rng_data_->mutable_gpu_data()), this->pooling_size_, hidden[0]);
   
   // do backwards pass to the visable layer
   SampleBackward_gpu(hidden, visable);
@@ -438,7 +405,7 @@ void RBMCuDNNConvolutionLayer<Dtype>::Update_gpu(
     switch (this->layer_param_.rbm_inner_product_param().loss_measure()) {
       case RBMInnerProductParameter_LossMeasure_RECONSTRUCTION:
         // copy the reconstruction from the backwards pass to the error vector
-        caffe_copy(visable_samp.count(), visable_samp.cpu_diff(), error_vector);
+        caffe_copy(visable_samp.count(), visable_samp.gpu_diff(), error_vector);
         break;
       case RBMInnerProductParameter_LossMeasure_FREE_ENERGY:
         // The free energy error was already calculated above
@@ -449,14 +416,12 @@ void RBMCuDNNConvolutionLayer<Dtype>::Update_gpu(
             << this->layer_param_.rbm_inner_product_param().loss_measure();
     }
   }
-  
   for(int i = 0; i < num_sample_steps_for_update_ - 1; ++i) {
     SampleForward_gpu(visable, hidden);
     SampleBackward_gpu(hidden, visable);
   }
   CuDNNConvolutionLayer<Dtype>::Forward_gpu(visable, hidden);
-  multinomial_squash(hidden[0], pooling_size_, hidden[0]);
-
+  multinomial_squash_gpu(hidden[0], pooling_size_, hidden[0]);
   for (int g = 0; g < this->group_; g++) {
     // update the bias diffs with \delta b += P(h | v_1)
     if (this->bias_term_) {

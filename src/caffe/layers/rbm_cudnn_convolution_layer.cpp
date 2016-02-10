@@ -42,11 +42,11 @@ inline void stochastic_samples(const Blob<Dtype>* blob_in,
     }
     // now for each h_{ij} see if the random number is between the sum of all the last h_{ij} and the sum plus this one
     running_sum = 0;
-    Dtype rn = uniform_sample[index];
+    Dtype rn = total_sum * uniform_sample[index];
     for (int i = 0; i < pooling_size; i++) {
       for (int j = 0; j < pooling_size; j++) {
         data_out[start_index + i * width_out + j] = 
-          (Dtype)(running_sum <= total_sum * rn && total_sum * rn < (running_sum += exp(data_in[start_index + i * width_out + j])));
+          (Dtype)(running_sum <= rn && rn < (running_sum += exp(data_in[start_index + i * width_out + j])));
       }
     }
   }
@@ -165,6 +165,14 @@ void RBMCuDNNConvolutionLayer<Dtype>::Forward_cpu(
     my_bot[0] = bottom[0];
     my_top[0] = top[0];
     ConvolutionLayer<Dtype>::Forward_cpu(my_bot, my_top);
+    if (top.size() > 1 + num_errors_) {
+      for (int i = 0; i < top[0]->count(); ++i) {
+        top[1]->mutable_cpu_data()[i] = Dtype(1. / (1 + std::exp(-1 * top[0]->cpu_data()[i])));
+      }
+      if (top.size() > 2 + num_errors_) {
+        stochastic_samples(top[0], static_cast<Dtype*>(rng_data_->mutable_cpu_data()), this->pooling_size_, top[2]);
+      }
+    }
   }
 }
 
@@ -172,7 +180,6 @@ template <typename Dtype>
 void RBMCuDNNConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
     const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom) {
   // TODO: do checks on the sizes of these inputs
-  
   const Dtype* weight   = this->blobs_[0]->cpu_data();
   const Dtype* top_data = top[0]->cpu_data();
   Dtype* bottom_diff    = bottom[0]->mutable_cpu_diff();
@@ -205,8 +212,13 @@ void RBMCuDNNConvolutionLayer<Dtype>::SampleBackward_cpu(
     const vector<Blob<Dtype>*>& top, const vector<Blob<Dtype>*>& bottom) {
   vector<bool> prop_down;  // dummy variable
   this->Backward_cpu(top, prop_down, bottom);
+  if(true) {
+  caffe_rng_gaussian(bottom[0]->count(), Dtype(0), Dtype(1.), static_cast<Dtype*>(bottom[0]->mutable_cpu_data()));
+  caffe_axpy(bottom[0]->count(), Dtype(1.), bottom[0]->cpu_diff(), bottom[0]->mutable_cpu_data());
+  } else {
   squash_diff(bottom);
   make_samples_from_diff(bottom[0], bottom[0]);
+  }
 }
 
 template <typename Dtype>
