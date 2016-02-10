@@ -32,12 +32,16 @@ class ImageDataLayer : public BasePrefetchingDataLayer<Dtype> {
   virtual inline int ExactNumBottomBlobs() const { return 0; }
   virtual inline int ExactNumTopBlobs() const { return 2; }
 
+  static const int NUM_LABEL_LISTS = 2;
+  static const Dtype LABEL_VALUE = 1;
+  static const Dtype IGNORE_LABEL_VALUE = -1;
+
  protected:
   shared_ptr<Caffe::RNG> prefetch_rng_;
   virtual void ShuffleImages();
   virtual void load_batch(Batch<Dtype>* batch);
 
-  vector<std::pair<std::string, std::pair<vector<int>, vector<int> > > > lines_;
+  vector<std::pair<std::string, vector<vector<int> > > > lines_;
   int lines_id_;
 
   int num_labels_per_line_;

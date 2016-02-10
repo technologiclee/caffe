@@ -51,7 +51,7 @@ void ImageDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
     if (iss.peek() == '#') continue;
 
     iss >> filename;
-    vector<vector<int> > labels(2);
+    vector<vector<int> > labels(NUM_LABEL_LISTS);
     int total_labels = 0;
 
     for (int v = 0; v < labels.size(); ++v) {
@@ -80,8 +80,7 @@ void ImageDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
       is_multi_label = true;
     }
 
-    lines_.push_back(
-        std::make_pair(filename, std::make_pair(labels[0], labels[1])));
+    lines_.push_back(std::make_pair(filename, labels));
   }
 
   if (is_multi_label) {
@@ -194,16 +193,20 @@ void ImageDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     trans_time += timer.MicroSeconds();
 
     if (num_labels_per_line_ == 1) {
-      prefetch_label[item_id] = lines_[lines_id_].second.first[0];
+      prefetch_label[item_id] = lines_[lines_id_].second[0][0];
     } else {
       int label_offset = batch->label_.offset(item_id);
-      // Set the labels
-      for (int l = 0; l < lines_[lines_id_].second.first.size(); ++l) {
-        prefetch_label[label_offset + lines_[lines_id_].second.first[l]] = 1;
-      }
-      // Set the ignore labels
-      for (int l = 0; l < lines_[lines_id_].second.second.size(); ++l) {
-        prefetch_label[label_offset + lines_[lines_id_].second.second[l]] = -1;
+      int NUM_LABEL_LISTS = lines_[lines_id_].second.size();
+      vector<Dtype> label_values(NUM_LABEL_LISTS, 0);
+      // Set the labels and ignore label values.
+      label_values[0] = LABEL_VALUE;
+      label_values[1] = IGNORE_LABEL_VALUE;
+
+      for (int v = 0; v < NUM_LABEL_LISTS; ++v) {
+        for (int l = 0; l < lines_[lines_id_].second[v].size(); ++l) {
+          prefetch_label[label_offset + lines_[lines_id_].second[v][l]] =
+              label_values[v];
+        }
       }
     }
 
