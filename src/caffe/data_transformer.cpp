@@ -338,7 +338,7 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
         }
         if (has_scale_file) {
           int scale_index = (c * img_height + h_off + h) * img_width + w_off + w;
-          transformed_data[top_index] *= scale_ptr[scale_index];
+          scale = scale_ptr[scale_index];
         }
         // int top_index = (c * height + h) * width + w;
         Dtype pixel = static_cast<Dtype>(ptr[img_index++]);
