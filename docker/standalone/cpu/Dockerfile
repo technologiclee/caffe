@@ -1,51 +1,42 @@
 FROM ubuntu:14.04
+#MAINTAINER fixme@example.com
 
-RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    libgflags-dev \
-    libgoogle-glog-dev \
-    libopencv-dev \
-    libleveldb-dev \
-    libsnappy-dev \
-    liblmdb-dev \
-    libhdf5-serial-dev \
-    libprotobuf-dev \
-    protobuf-compiler \
-    libatlas-base-dev \
-    python-dev \
-    python-pip \
-    python-numpy \
-    python-scipy \
-    gfortran \
-    cmake \
-    git
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        git \
+        libatlas-base-dev \
+        libboost-all-dev \
+        libgflags-dev \
+        libgoogle-glog-dev \
+        libhdf5-serial-dev \
+        libleveldb-dev \
+        liblmdb-dev \
+        libopencv-dev \
+        libprotobuf-dev \
+        libsnappy-dev \
+        protobuf-compiler \
+        python-dev \
+        python-numpy \
+        python-pip \
+        python-scipy
+    #      && \
+    # rm -rf /var/lib/apt/lists/*
 
-# Use --no-install-recommends for the boost libs.
-RUN apt-get install -y --no-install-recommends \
-    libboost-all-dev
+ENV CAFFE_ROOT=/opt/caffe
+WORKDIR $CAFFE_ROOT
 
-RUN apt-get clean \
- && rm -rf /var/lib/apt/lists/*
-
-# Clone the GIT repository
-RUN mkdir -p /opt/caffe && cd /opt/caffe && \
-    git clone https://github.com/BVLC/caffe.git . && \
-# Install the Python requirements
-    cat python/requirements.txt | xargs -n1 pip install && \
-# Create a build directory.
-    mkdir build && cd build && \    
-# Run cmake with the specified arguments.
-    cmake -DCPU_ONLY=1 -DCMAKE_INSTALL_PREFIX=/usr/local .. && \
-# Run make
+# FIXME: clone a specific git tag
+RUN git clone --depth 1 https://github.com/BVLC/caffe.git . && \
+    for req in $(cat python/requirements.txt); do sudo pip install $req; done && \
+    mkdir build && cd build && \
+    cmake -DCPU_ONLY=1 .. && \
     make -j"$(nproc)" all && \
-    make -j"$(nproc)" pycaffe && \
-    make -j"$(nproc)" install && \
-# Also build utility targets (for testing)
-    make -j"$(nproc)" test.testbin
+    make -j"$(nproc)" pycaffe
 
-
-RUN echo "/usr/local/lib" >> /etc/ld.so.conf.d/caffe.conf && ldconfig
-ENV PYTHONPATH=/usr/local/python:$PYTHONPATH
+ENV PYTHONPATH $CAFFE_ROOT/python:$PYTHONPATH
+ENV PATH $CAFFE_ROOT/build/tools:$PATH
+RUN echo "$CAFFE_ROOT/build/lib" >> /etc/ld.so.conf.d/caffe.conf && ldconfig
 
 WORKDIR /workspace
 
