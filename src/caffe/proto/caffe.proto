@@ -788,6 +788,21 @@ message InnerProductParameter {
   optional int32 axis = 5 [default = 1];
 }
 
+message RBMInnerProductParameter {
+  // Whether to have a visable bias term (note that the bias term in
+  // InnerProduct acts as a hidden bias)
+  optional bool visable_bias_term = 1;
+  // Number gibbs sampling iterations to perform during update
+  optional uint32 sample_steps_in_update = 2 [default = 1];
+  // The filler for the visable bias
+  optional FillerParameter visable_bias_filler = 3;
+  enum LossMeasure {
+    RECONSTRUCTION = 0;
+    FREE_ENERGY    = 1;
+  }
+  repeated LossMeasure loss_measure = 4 [default = RECONSTRUCTION];
+}
+
 // Message that stores parameters used by LogLayer
 message LogParameter {
   // LogLayer computes outputs y = log_base(shift + scale * x), for base > 0.
