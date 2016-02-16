@@ -216,12 +216,43 @@ void RBMInnerProductLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
 template <typename Dtype>
 void RBMInnerProductLayer<Dtype>::Forward_cpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
+  const RBMInnerProductParameter& param =
+      this->layer_param_.rbm_inner_product_param();
+  if (param.forward_is_update()) {
+    // do some sampling and then an update
+  } else {
+    // just sample forwards
+    sample_h_given_v(bottom, top);
+  }
 }
 
 template <typename Dtype>
 void RBMInnerProductLayer<Dtype>::Backward_cpu(
     const vector<Blob<Dtype>*>& top, const vector<bool>& propagate_down,
     const vector<Blob<Dtype>*>& bottom) {
+}
+
+template <typename Dtype>
+void RBMInnerProductLayer<Dtype>::sample_h_given_v(
+    const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
+  const RBMInnerProductParameter& param =
+      this->layer_param_.rbm_inner_product_param();
+  // Do a forward pass through each of the layers.
+  if (top.size() >= num_error_ + 1) {
+    connection_layer_->Forward(bottom, pre_activation_h1_vec_);
+    if (top.size() >= num_error_ + 2) {
+      if (param.has_hidden_activation_layer_param()) {
+        hidden_activation_layer_->Forward(pre_activation_h1_vec_,
+                                          post_activation_h1_vec_);
+      }
+      if (top.size() >= num_error_ + 3) {
+        if (param.has_hidden_sampling_layer_param()) {
+          hidden_sampling_layer_->Forward(post_activation_h1_vec_,
+                                          sample_h1_vec_);
+        }
+      }
+    }
+  }
 }
 
 #ifdef CPU_ONLY

@@ -9,6 +9,7 @@
 #include "caffe/blob.hpp"
 #include "caffe/common.hpp"
 #include "caffe/filler.hpp"
+#include "caffe/layers/inner_product_layer.hpp"
 #include "caffe/layers/rbm_inner_product_layer.hpp"
 #include "caffe/layers/sigmoid_layer.hpp"
 #include "caffe/util/rng.hpp"
@@ -57,12 +58,12 @@ class RBMInnerProductLayerTest : public MultiDeviceTest<TypeParam> {
     layer_.reset(new RBMInnerProductLayer<Dtype>(layer_param));
   }
 
-  virtual string getLayerText(const string& extra_text = "") {
+  virtual string getLayerText(const string& extra_text = "",
+                              bool forward_is_update = true) {
     string proto =
       "name: 'rbm_inner_product_layer' "
       "type: 'RBMInnerProduct' "
       "rbm_inner_product_param { "
-      "  forward_is_update: true "
       "  sample_steps_in_update: 2 "
       "  connection_layer_param { "
       "    name: 'connection_inner_product' "
@@ -81,6 +82,11 @@ class RBMInnerProductLayerTest : public MultiDeviceTest<TypeParam> {
       "    type: 'BernoulliSample' "
       "  } "
       "  visible_bias_term: true ";
+    if (forward_is_update) {
+      proto += "  forward_is_update: true ";
+    } else {
+      proto += "  forward_is_update: false ";
+    }
     proto += extra_text;
     proto += "} ";
     return proto;
@@ -221,6 +227,92 @@ TYPED_TEST(RBMInnerProductLayerTest, TestSetUpWithVisibleActivation) {
   EXPECT_EQ(this->blob_top_error_2_->channels(), 1);
   EXPECT_EQ(this->blob_top_error_2_->height(), 1);
   EXPECT_EQ(this->blob_top_error_2_->width(), 1);
+}
+
+TYPED_TEST(RBMInnerProductLayerTest, TestForwardNoUpdate) {
+  typedef typename TypeParam::Dtype Dtype;
+  string extra_text = "  loss_measure: FREE_ENERGY ";
+  string proto = this->getLayerText(extra_text, false);
+
+  // run forward with no non error output
+  this->InitLayerFromProtoString(proto);
+  this->blob_top_vec_.clear();
+  this->blob_top_vec_.push_back(this->blob_top_error_1_);
+  this->layer_->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  this->layer_->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+
+  // create an inner product layer that is a copy of this one
+  this->blob_top_vec_.clear();
+  this->blob_top_vec_.push_back(this->pre_activation_h1_);
+
+  string ip_proto =
+      "name: 'inner_product_layer' "
+      "type: 'InnerProduct' "
+      "inner_product_param { "
+      "  num_output: 10 "
+      "  bias_term: true "
+      "} ";
+  LayerParameter layer_param;
+  CHECK(google::protobuf::TextFormat::ParseFromString(ip_proto, &layer_param));
+  InnerProductLayer<Dtype> ip_layer(layer_param);
+  Blob<Dtype> ip_top_blob;
+  vector<Blob<Dtype>*> ip_top_vec;
+  ip_top_vec.push_back(&ip_top_blob);
+  ip_layer.SetUp(this->blob_bottom_vec_, ip_top_vec);
+
+  // copy the weights so they are the same
+  caffe_copy(ip_layer.blobs()[0]->count(), this->layer_->blobs()[0]->cpu_data(),
+             ip_layer.blobs()[0]->mutable_cpu_data());
+  caffe_copy(ip_layer.blobs()[1]->count(), this->layer_->blobs()[1]->cpu_data(),
+             ip_layer.blobs()[1]->mutable_cpu_data());
+
+  // do a forward with both layers
+  ip_layer.Forward(this->blob_bottom_vec_, ip_top_vec);
+
+  this->blob_top_vec_.push_back(this->blob_top_error_1_);
+  this->layer_->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  this->layer_->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+
+  ASSERT_EQ(ip_top_blob.count(), this->pre_activation_h1_->count());
+  // make sure the data is the same
+  for (int i = 0; i < ip_top_blob.count(); ++i) {
+    EXPECT_FLOAT_EQ(ip_top_blob.cpu_data()[i],
+                    this->pre_activation_h1_->cpu_data()[i]);
+  }
+
+  // now do a forward and a squash
+  SigmoidLayer<Dtype> sigmoid_layer(layer_param);
+  this->blob_top_vec_.clear();
+  this->blob_top_vec_.push_back(this->pre_activation_h1_);
+  this->blob_top_vec_.push_back(this->post_activation_h1_);
+  this->blob_top_vec_.push_back(this->blob_top_error_1_);
+  this->layer_->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  this->layer_->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  ASSERT_EQ(ip_top_blob.count(), this->pre_activation_h1_->count());
+  for (int i = 0; i < ip_top_blob.count(); ++i) {
+    EXPECT_FLOAT_EQ(ip_top_blob.cpu_data()[i],
+                    this->pre_activation_h1_->cpu_data()[i]);
+  }
+  sigmoid_layer.SetUp(ip_top_vec, ip_top_vec);
+  sigmoid_layer.Forward(ip_top_vec, ip_top_vec);
+  ASSERT_EQ(ip_top_blob.count(), this->post_activation_h1_->count());
+  for (int i = 0; i < ip_top_blob.count(); ++i) {
+    EXPECT_FLOAT_EQ(ip_top_blob.cpu_data()[i],
+                    this->post_activation_h1_->cpu_data()[i]);
+  }
+
+  // check that the sampling really gives us just zeros and ones
+  this->blob_top_vec_.clear();
+  this->blob_top_vec_.push_back(this->pre_activation_h1_);
+  this->blob_top_vec_.push_back(this->post_activation_h1_);
+  this->blob_top_vec_.push_back(this->sample_h1_);
+  this->blob_top_vec_.push_back(this->blob_top_error_1_);
+  this->layer_->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  this->layer_->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  for (int i = 0; i < ip_top_blob.count(); ++i) {
+    EXPECT_TRUE((this->sample_h1_->cpu_data()[i] == 0 ||
+                 this->sample_h1_->cpu_data()[i] == 1));
+  }
 }
 
 }  // namespace caffe
