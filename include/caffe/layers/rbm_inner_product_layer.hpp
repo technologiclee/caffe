@@ -16,11 +16,6 @@ namespace caffe {
  * sampling, the first bottom blob's diff gets the backward propigated
  * probabilites, and the blob's data gets samples from these probabilites.
  *
- * If a second bottom blob is set, it is the "clamp." The clamp is a blob the
- * same size as the first (input data) blob and only has an effect during
- * sampling.  For any index, if the clamp value is set to one, then backward
- * sampling does not change the input data at that index.
- *
  * The top contains then one to three blobs describing the hidden state of the
  * RBM followed by an arbitrary number of blobs with different error values.
  *
@@ -41,8 +36,7 @@ class RBMInnerProductLayer : public Layer<Dtype> {
   virtual void Reshape(const vector<Blob<Dtype>*>& bottom,
                        const vector<Blob<Dtype>*>& top);
   virtual inline const char* type() const { return "RBMInnerProduct"; }
-  virtual inline int MinBottomBlobs() const { return 1; }
-  virtual inline int MinTopBlobs() const { return 1; }
+  virtual inline int ExactNumBottomBlobs() const { return 1; }
 
  protected:
   /**
@@ -60,6 +54,46 @@ class RBMInnerProductLayer : public Layer<Dtype> {
   virtual void Backward_gpu(const vector<Blob<Dtype>*>& top,
                             const vector<bool>& propagate_down,
                             const vector<Blob<Dtype>*>& bottom);
+
+  /// number of top blobs used for error reporting
+  int num_error_;
+  /// Forward pass is an update and not just a simple forward through connection
+  bool forward_is_update_;
+  int num_sample_steps_for_update_;
+  bool visible_bias_term_;
+
+  int visible_bias_index_;
+  Blob<Dtype> bias_multiplier_;
+
+ private:
+  /// The layer which is used to fist process the input.
+  shared_ptr<Layer<Dtype> > connection_layer_;
+  /// Layer used to squash the hidden units
+  shared_ptr<Layer<Dtype> > hidden_activation_layer_;
+  /// Layer used to squash the visible units
+  shared_ptr<Layer<Dtype> > visible_activation_layer_;
+  /// A layer used to sample the hidden activations.
+  shared_ptr<Layer<Dtype> > hidden_sampling_layer_;
+  /// A layer used to sample the visible activations.
+  shared_ptr<Layer<Dtype> > visible_sampling_layer_;
+
+  /// vectors that store the data after connection_layer_ has done forward
+  /// or backward pass, but before the activation_layer_ has been called
+  shared_ptr<Blob<Dtype> > pre_activation_h1_blob_;
+  shared_ptr<Blob<Dtype> > pre_activation_v1_blob_;
+  vector<Blob<Dtype>*> pre_activation_h1_vec_;
+  vector<Blob<Dtype>*> pre_activation_v1_vec_;
+
+  /// vectors that store the data after activation_layer_ has done forward
+  /// or backward pass, but before the sampling_layer_ has been called
+  shared_ptr<Blob<Dtype> > post_activation_h1_blob_;
+  shared_ptr<Blob<Dtype> > post_activation_v1_blob_;
+  vector<Blob<Dtype>*> post_activation_h1_vec_;
+  vector<Blob<Dtype>*> post_activation_v1_vec_;
+
+  shared_ptr<Blob<Dtype> > sample_h1_blob_;
+  vector<Blob<Dtype>*> sample_h1_vec_;
+  vector<Blob<Dtype>*> sample_v1_vec_;
 };
 
 }  // namespace caffe
