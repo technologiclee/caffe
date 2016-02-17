@@ -1,5 +1,7 @@
 # A makefile to build the docker images for caffe.
 
+DOCKER ?= docker
+
 all: docker_files standalone
 
 .PHONY: standalone devel
@@ -8,10 +10,10 @@ standalone: cpu_standalone gpu_standalone
 
 
 cpu_standalone: standalone/cpu/Dockerfile
-	docker build -t caffe standalone/cpu
+	$(DOCKER) build -t caffe standalone/cpu
 
 gpu_standalone: standalone/gpu/Dockerfile
-	docker build -t caffe:gpu standalone/gpu
+	$(DOCKER) build -t caffe:gpu standalone/gpu
 
 docker_files: standalone_files
 
