@@ -8,6 +8,29 @@
 #include "caffe/util/device_alternate.hpp"
 
 namespace caffe {
+  
+/** @brief The following class provides a wrapper for a Blob which swaps the
+ * data_ and diff_ arrays.
+ **/
+template <typename Dtype>
+class SwapBlob: public Blob<Dtype> {
+ public:
+  /// @brief shallow copy that copies and swaps smart pointers to data and diff
+  explicit SwapBlob(const Blob<Dtype>* other) : Blob<Dtype>() {
+    SetUp(other);
+  }
+  void SetUp(const Blob<Dtype>* other) {
+    CHECK_EQ(this->count_, other->count());
+    this->diff_ = other->data();
+    this->data_ = other->diff();
+    this->capacity_ = other->count();
+    // since capacity was set, this resize does not reallocate
+    this->ReshapeLike(*other);
+  }
+ private:
+  // disable default construct and assign
+  explicit SwapBlob() {}
+};
 
 template <typename Dtype>
 void RBMInnerProductLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
@@ -20,7 +43,9 @@ void RBMInnerProductLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   num_sample_steps_for_update_ = param.sample_steps_in_update();
   forward_is_update_           = param.forward_is_update();
   vector<int> starting_bottom_shape = bottom[0]->shape();
-
+  const int axis = 1;
+  num_visible_ = bottom[0]->count(axis);
+  batch_size_ = bottom[0]->count(0, axis);
   CHECK_GE(top.size(), num_error_)
       << "top must be at least as large as the number of errors";
   CHECK_LE(top.size(), num_error_ + 3)
@@ -35,12 +60,13 @@ void RBMInnerProductLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   }
   sample_v1_vec_.clear();
   sample_v1_vec_.push_back(bottom[0]);
-
-  // set up the connection layer
-  CHECK(param.has_connection_layer_param())
-    << "a connection layer must be specified for the RBMInnerProductLayer";
-  connection_layer_ =
-    LayerRegistry<Dtype>::CreateLayer(param.connection_layer_param());
+  if (!skip_init) {
+    // set up the connection layer
+    CHECK(param.has_connection_layer_param())
+      << "a connection layer must be specified for the RBMInnerProductLayer";
+    connection_layer_ =
+      LayerRegistry<Dtype>::CreateLayer(param.connection_layer_param());
+  }
   connection_layer_->SetUp(sample_v1_vec_, pre_activation_h1_vec_);
 
   // set up the hidden post_activation_layer_ vector
@@ -54,8 +80,10 @@ void RBMInnerProductLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
 
   // set up the hidden_activation_layer
   if (param.has_hidden_activation_layer_param()) {
-    hidden_activation_layer_ =
-      LayerRegistry<Dtype>::CreateLayer(param.hidden_activation_layer_param());
+    if (!skip_init) {
+      hidden_activation_layer_ =
+        LayerRegistry<Dtype>::CreateLayer(param.hidden_activation_layer_param());
+    }
     hidden_activation_layer_->SetUp(pre_activation_h1_vec_,
                                     post_activation_h1_vec_);
   } else {
@@ -73,8 +101,10 @@ void RBMInnerProductLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
 
   // set up the hidden_sampling_layer_
   if (param.has_hidden_sampling_layer_param()) {
-    hidden_sampling_layer_ =
-      LayerRegistry<Dtype>::CreateLayer(param.hidden_sampling_layer_param());
+    if (!skip_init) {
+      hidden_sampling_layer_ =
+        LayerRegistry<Dtype>::CreateLayer(param.hidden_sampling_layer_param());
+    }
     hidden_sampling_layer_->SetUp(post_activation_h1_vec_,
                                   sample_h1_vec_);
   } else {
@@ -83,6 +113,7 @@ void RBMInnerProductLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
 
   // set up the visible pre and post_activation vectors
   pre_activation_v1_blob_.reset(new Blob<Dtype>(bottom[0]->shape()));
+  pre_activation_v1_blob_->ShareDiff(*bottom[0]);
   pre_activation_v1_vec_.clear();
   pre_activation_v1_vec_.push_back(pre_activation_v1_blob_.get());
   post_activation_v1_blob_.reset(new Blob<Dtype>(bottom[0]->shape()));
@@ -91,8 +122,10 @@ void RBMInnerProductLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
 
   // set up the visible_activation_layer
   if (param.has_visible_activation_layer_param()) {
-    visible_activation_layer_ =
-      LayerRegistry<Dtype>::CreateLayer(param.visible_activation_layer_param());
+    if (!skip_init) {
+      visible_activation_layer_ =
+        LayerRegistry<Dtype>::CreateLayer(param.visible_activation_layer_param());
+    }
     visible_activation_layer_->SetUp(pre_activation_v1_vec_,
                                      post_activation_v1_vec_);
   } else {
@@ -101,8 +134,10 @@ void RBMInnerProductLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
 
   // set up the visible_sampling_layer_
   if (param.has_visible_sampling_layer_param()) {
-    visible_sampling_layer_ =
-      LayerRegistry<Dtype>::CreateLayer(param.visible_sampling_layer_param());
+    if (!skip_init) {
+      visible_sampling_layer_ =
+        LayerRegistry<Dtype>::CreateLayer(param.visible_sampling_layer_param());
+    }
     visible_sampling_layer_->SetUp(post_activation_v1_vec_,
                                    sample_v1_vec_);
   } else {
@@ -143,11 +178,11 @@ void RBMInnerProductLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
 }
 
 template <typename Dtype>
-void reshape_error(int index, int num_error,
+void reshape_error(int index, int num_error, int batch_size,
     const RBMInnerProductParameter& param, const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
   const int top_index = top.size() + index - num_error;
-  vector<int> blob_shape(1, bottom[0]->shape(0));
+  vector<int> blob_shape(1, batch_size);
   switch (param.loss_measure(index)) {
   case RBMInnerProductParameter_LossMeasure_RECONSTRUCTION:
     top[top_index]->ReshapeLike(*bottom[0]);
@@ -170,7 +205,25 @@ void RBMInnerProductLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
 
   // better safe than sorry
   sample_v1_vec_[0] = bottom[0];
+  
+  if (top.size() >= num_error_ + 1) {
+    pre_activation_h1_vec_[0] = top[0];
+  } else {
+    pre_activation_h1_vec_[0] = pre_activation_h1_blob_.get();
+  }
+  
+  if (top.size() >= num_error_ + 2) {
+    post_activation_h1_vec_[0] = top[1];
+  } else {
+    post_activation_h1_vec_[0] = post_activation_h1_blob_.get();
+  }
 
+  if (top.size() >= num_error_ + 3) {
+    sample_h1_vec_[0] = top[2];
+  } else {
+    sample_h1_vec_[0] = sample_h1_blob_.get();
+  }
+  
   // Reshape each of the layers for the forward pass.
   connection_layer_->Reshape(sample_v1_vec_, pre_activation_h1_vec_);
   if (param.has_hidden_activation_layer_param()) {
@@ -209,7 +262,7 @@ void RBMInnerProductLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
   }
 
   for (int i = 0; i < num_error_; ++i) {
-    reshape_error(i, num_error_, param, bottom, top);
+    reshape_error(i, num_error_, batch_size_, param, bottom, top);
   }
 }
 
@@ -218,8 +271,19 @@ void RBMInnerProductLayer<Dtype>::Forward_cpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   const RBMInnerProductParameter& param =
       this->layer_param_.rbm_inner_product_param();
+    
   if (param.forward_is_update()) {
+    // create a top with all three processing steps
+    vector<Blob<Dtype>*> full_top;
+    full_top.push_back(this->pre_activation_h1_vec_[0]);
+    full_top.push_back(this->post_activation_h1_vec_[0]);
+    full_top.push_back(this->sample_h1_vec_[0]);
+    
+    // sample forward
+    sample_h_given_v(bottom, full_top);
+    
     // do some sampling and then an update
+    gibbs_hvh(bottom, full_top);
   } else {
     // just sample forwards
     sample_h_given_v(bottom, top);
@@ -252,6 +316,85 @@ void RBMInnerProductLayer<Dtype>::sample_h_given_v(
         }
       }
     }
+  }
+}
+
+template <typename Dtype>
+void RBMInnerProductLayer<Dtype>::gibbs_hvh(
+    const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
+  // Disable the update of the diffs for the weights.
+  for (int i = 0; i < connection_layer_->blobs().size(); ++i) {
+    connection_layer_->set_param_propagate_down(i, false);
+  }
+
+  // Perform k Gibbs sampling steps.
+  for (int k = 0; k < num_sample_steps_for_update_; k++) {
+    // Down propagation
+    sample_v_given_h(bottom, top);
+
+    // Up propagation
+    sample_h_given_v(bottom, top);
+  }
+
+  // Enable the update of the diffs for the weights and hidden bias again.
+  for (int i = 0; i < connection_layer_->blobs().size(); ++i) {
+    connection_layer_->set_param_propagate_down(i, true);
+  }
+}
+
+template <typename Dtype>
+void RBMInnerProductLayer<Dtype>::sample_v_given_h(
+    const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
+  const RBMInnerProductParameter& param =
+      this->layer_param_.rbm_inner_product_param();
+  SwapBlob<Dtype> swapped_top(top[0]);
+  vector<Blob<Dtype>*> h1;
+  h1.push_back(&swapped_top);
+
+  // Do a backward pass through the connection layer, saving result to pre_activation diffs
+  vector<bool> propagate_down(0);
+  propagate_down.push_back(true);
+  connection_layer_->Backward(h1, propagate_down, pre_activation_v1_vec_);
+  // Add the visible bias to the pre activation.
+  
+  if (visible_bias_term_) {
+    switch (Caffe::mode()) {
+    case Caffe::CPU:
+      caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, this->batch_size_,
+                            this->num_visible_, 1,
+                            (Dtype)1., this->bias_multiplier_.cpu_data(),
+                            this->blobs_[visible_bias_index_]->cpu_data(),
+                            (Dtype)1., pre_activation_v1_vec_[0]->mutable_cpu_diff());
+      break;
+    case Caffe::GPU:
+#ifndef CPU_ONLY
+      caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, this->batch_size_,
+                            this->num_visible_, 1,
+                            (Dtype)1., this->bias_multiplier_.gpu_data(),
+                            this->blobs_[visible_bias_index_]->gpu_data(),
+                            (Dtype)1., pre_activation_v1_vec_[0]->mutable_gpu_diff());
+#else
+      NO_GPU;
+#endif
+      break;
+    default:
+      LOG(FATAL) << "Unknown caffe mode: " << Caffe::mode();
+    }
+  }
+
+  // swap diff and data for pre_activation to do sqash and sample
+  SwapBlob<Dtype> swapped_pre_activation(pre_activation_v1_vec_[0]);
+  vector<Blob<Dtype>*> pre_activation_v1;
+  pre_activation_v1.push_back(&swapped_pre_activation);
+
+  // Do a forward pass through the activation layer.
+  if (param.has_visible_activation_layer_param()) {
+    visible_activation_layer_->Forward(pre_activation_v1, post_activation_v1_vec_);
+  }
+  
+  // Sample the mean field and store this in the bottom.
+  if (param.has_visible_sampling_layer_param()) {
+    visible_sampling_layer_->Forward(post_activation_v1_vec_, bottom);
   }
 }
 
