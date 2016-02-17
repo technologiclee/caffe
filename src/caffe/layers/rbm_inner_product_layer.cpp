@@ -20,10 +20,10 @@ class SwapBlob: public Blob<Dtype> {
     SetUp(other);
   }
   void SetUp(const Blob<Dtype>* other) {
-    CHECK_EQ(this->count_, other->count());
     this->diff_ = other->data();
     this->data_ = other->diff();
     this->capacity_ = other->count();
+    this->count_ = other->count();
     // since capacity was set, this resize does not reallocate
     this->ReshapeLike(*other);
   }
@@ -35,6 +35,9 @@ class SwapBlob: public Blob<Dtype> {
 template <typename Dtype>
 void RBMInnerProductLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                                              const vector<Blob<Dtype>*>& top) {
+  setup_sizes_.clear();
+  setup_sizes_.push_back(bottom.size());
+  setup_sizes_.push_back(top.size());
   bool skip_init = (this->blobs_.size() > 0);
   const RBMInnerProductParameter& param =
       this->layer_param_.rbm_inner_product_param();
@@ -198,6 +201,10 @@ void reshape_error(int index, int num_error, int batch_size,
 template <typename Dtype>
 void RBMInnerProductLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
                                           const vector<Blob<Dtype>*>& top) {
+  CHECK_EQ(bottom.size(), setup_sizes_[0])
+      << "bottom must be the same size at SetUp, Reshape and Forward";
+  CHECK_EQ(top.size(), setup_sizes_[1])
+      << "top must be the same size at SetUp, Reshape and Forward";
   // Figure out the dimensions
   vector<int> starting_bottom_shape = bottom[0]->shape();
   const RBMInnerProductParameter& param =
@@ -294,6 +301,21 @@ template <typename Dtype>
 void RBMInnerProductLayer<Dtype>::Backward_cpu(
     const vector<Blob<Dtype>*>& top, const vector<bool>& propagate_down,
     const vector<Blob<Dtype>*>& bottom) {
+  if (propagate_down[0]) {
+    // Disable the update of the diffs for the weights.
+    for (int i = 0; i < connection_layer_->blobs().size(); ++i) {
+      connection_layer_->set_param_propagate_down(i, false);
+    }
+    vector<Blob<Dtype>*> hidden(0);
+    SwapBlob<Dtype> hidden_blob(top[0]);
+    hidden.push_back(&hidden_blob);
+    sample_v_given_h(bottom, hidden);
+
+    // Enable the update of the diffs for the weights.
+    for (int i = 0; i < connection_layer_->blobs().size(); ++i) {
+      connection_layer_->set_param_propagate_down(i, true);
+    }
+  }
 }
 
 template <typename Dtype>
@@ -352,8 +374,7 @@ void RBMInnerProductLayer<Dtype>::sample_v_given_h(
   h1.push_back(&swapped_top);
 
   // Do a backward pass through the connection layer, saving result to pre_activation diffs
-  vector<bool> propagate_down(0);
-  propagate_down.push_back(true);
+  vector<bool> propagate_down(1, true);
   connection_layer_->Backward(h1, propagate_down, pre_activation_v1_vec_);
   // Add the visible bias to the pre activation.
   
@@ -397,10 +418,6 @@ void RBMInnerProductLayer<Dtype>::sample_v_given_h(
     visible_sampling_layer_->Forward(post_activation_v1_vec_, bottom);
   }
 }
-
-#ifdef CPU_ONLY
-STUB_GPU(RBMInnerProductLayer);
-#endif
 
 INSTANTIATE_CLASS(RBMInnerProductLayer);
 REGISTER_LAYER_CLASS(RBMInnerProduct);

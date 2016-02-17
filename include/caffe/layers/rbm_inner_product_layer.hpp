@@ -49,11 +49,6 @@ class RBMInnerProductLayer : public Layer<Dtype> {
   virtual void Backward_cpu(const vector<Blob<Dtype>*>& top,
                             const vector<bool>& propagate_down,
                             const vector<Blob<Dtype>*>& bottom);
-  virtual void Forward_gpu(const vector<Blob<Dtype>*>& bottom,
-                           const vector<Blob<Dtype>*>& top);
-  virtual void Backward_gpu(const vector<Blob<Dtype>*>& top,
-                            const vector<bool>& propagate_down,
-                            const vector<Blob<Dtype>*>& bottom);
 
   /// number of top blobs used for error reporting
   int num_error_;
@@ -64,8 +59,20 @@ class RBMInnerProductLayer : public Layer<Dtype> {
 
   int visible_bias_index_;
   Blob<Dtype> bias_multiplier_;
+  int batch_size_;
+  int num_visible_;
+  /// The size of the top and bottom at setup
+  vector<int> setup_sizes_;
 
  private:
+  void sample_h_given_v(const vector<Blob<Dtype>*>& bottom,
+                        const vector<Blob<Dtype>*>& top);
+  void sample_v_given_h(const vector<Blob<Dtype>*>& bottom,
+                        const vector<Blob<Dtype>*>& top);
+  void gibbs_hvh(const vector<Blob<Dtype>*>& bottom,
+                 const vector<Blob<Dtype>*>& top);
+  void update_diffs(Dtype alpha, const vector<Blob<Dtype>*>& hidden_k,
+                    const vector<Blob<Dtype>*>& visible_k);
   /// The layer which is used to fist process the input.
   shared_ptr<Layer<Dtype> > connection_layer_;
   /// Layer used to squash the hidden units
