@@ -49,3 +49,4 @@ docker run -ti caffe:cpu python
 (`ipython` is also available in the container).
 
 Since the `caffe/python` folder is also added to the path, the utility executable scripts defined there can also be used as executables. This includes `draw_net.py`, `classify.py`, and `detect.py`
+
