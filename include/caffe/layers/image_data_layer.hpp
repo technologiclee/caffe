@@ -32,9 +32,17 @@ class ImageDataLayer : public BasePrefetchingDataLayer<Dtype> {
   virtual inline int ExactNumBottomBlobs() const { return 0; }
   virtual inline int ExactNumTopBlobs() const { return 2; }
 
+  // For the multi-label case, NUM_LABEL_LISTS of labels are maintained.
+  // (these are separated by ';')
   static const int NUM_LABEL_LISTS = 2;
-  static const Dtype LABEL_VALUE = 1;
-  static const Dtype IGNORE_LABEL_VALUE = -1;
+  // For mulit-label problems, each of the labels in a particular list are
+  // assigned a particular value.
+  static const Dtype LABEL_VALUES[NUM_LABEL_LISTS];
+
+  static const Dtype USE_LABEL = 1;
+  // TODO: The user should be able to specify the ignore label.
+  static const Dtype IGNORE_LABEL = -1;
+
 
  protected:
   shared_ptr<Caffe::RNG> prefetch_rng_;

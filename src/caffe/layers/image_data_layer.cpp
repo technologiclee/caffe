@@ -17,6 +17,12 @@
 
 namespace caffe {
 
+// Define the list of labels to use.
+template <typename Dtype>
+const Dtype ImageDataLayer<Dtype>::LABEL_VALUES[NUM_LABEL_LISTS] = {USE_LABEL,
+IGNORE_LABEL};
+
+
 template <typename Dtype>
 ImageDataLayer<Dtype>::~ImageDataLayer<Dtype>() {
   this->StopInternalThread();
@@ -175,6 +181,9 @@ void ImageDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   Dtype* prefetch_data = batch->data_.mutable_cpu_data();
   Dtype* prefetch_label = batch->label_.mutable_cpu_data();
 
+  // Init the labels to 0.
+  caffe_set(batch_size*num_labels_per_line_, Dtype(0), prefetch_label);
+
   // datum scales
   const int lines_size = lines_.size();
   for (int item_id = 0; item_id < batch_size; ++item_id) {
@@ -196,16 +205,11 @@ void ImageDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
       prefetch_label[item_id] = lines_[lines_id_].second[0][0];
     } else {
       int label_offset = batch->label_.offset(item_id);
-      int NUM_LABEL_LISTS = lines_[lines_id_].second.size();
-      vector<Dtype> label_values(NUM_LABEL_LISTS, 0);
       // Set the labels and ignore label values.
-      label_values[0] = LABEL_VALUE;
-      label_values[1] = IGNORE_LABEL_VALUE;
-
       for (int v = 0; v < NUM_LABEL_LISTS; ++v) {
         for (int l = 0; l < lines_[lines_id_].second[v].size(); ++l) {
           prefetch_label[label_offset + lines_[lines_id_].second[v][l]] =
-              label_values[v];
+              LABEL_VALUES[v];
         }
       }
     }
