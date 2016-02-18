@@ -1,4 +1,4 @@
-FROM nvidia/cuda:7.5-cudnn4-devel
+FROM nvidia/cuda:cudnn
 #MAINTAINER fixme@example.com
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -19,15 +19,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python-dev \
         python-numpy \
         python-pip \
-        python-scipy
-    #      && \
-    # rm -rf /var/lib/apt/lists/*
+        python-scipy && \
+    rm -rf /var/lib/apt/lists/*
 
 ENV CAFFE_ROOT=/opt/caffe
 WORKDIR $CAFFE_ROOT
 
 # FIXME: clone a specific git tag
-RUN git clone --depth 1 https://github.com/BVLC/caffe.git . && \
+ARG CLONE_TAG=master
+
+RUN git clone -b ${CLONE_TAG} --single-branch --depth 1 https://github.com/BVLC/caffe.git . && \
     for req in $(cat python/requirements.txt); do pip install $req; done && \
     mkdir build && cd build && \
     cmake -DUSE_CUDNN=1 .. && \
@@ -40,5 +41,3 @@ RUN echo "$CAFFE_ROOT/build/lib" >> /etc/ld.so.conf.d/caffe.conf && ldconfig
 
 WORKDIR /workspace
 
-# Set the entrypoint to the caffe executable
-ENTRYPOINT ["caffe"]
